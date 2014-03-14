@@ -66,6 +66,9 @@ EXPORT_SYMBOL(test_and_clear_bit);
 EXPORT_SYMBOL(change_bit);
 EXPORT_SYMBOL(test_and_change_bit);
 
+	/* SHA-1 implementation under lib/ */
+EXPORT_SYMBOL(sha_transform);
+
 #ifdef CONFIG_FUNCTION_TRACER
 EXPORT_SYMBOL(_mcount);
 #endif
