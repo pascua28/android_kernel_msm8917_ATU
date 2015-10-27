@@ -53,6 +53,10 @@ config WLAN_OFFLOAD_PACKETS
 	bool "Enable offload packets feature"
 	default n
 
+config WLAN_FEATURE_RX_WAKELOCK
+	bool "Enable RX wake lock feature"
+	default n
+
 config HUAWEI_WIFI_BUILTIN
 	bool "disable huawei build in feature"
 	default n
