@@ -52,18 +52,18 @@ static void zcomp_strm_free(struct zcomp *comp, struct zcomp_strm *zstrm)
  * allocate new zcomp_strm structure with ->private initialized by
  * backend, return NULL on error
  */
-static struct zcomp_strm *zcomp_strm_alloc(struct zcomp *comp)
+static struct zcomp_strm *zcomp_strm_alloc(struct zcomp *comp, gfp_t flags)
 {
-	struct zcomp_strm *zstrm = kmalloc(sizeof(*zstrm), GFP_NOIO);
+	struct zcomp_strm *zstrm = kmalloc(sizeof(*zstrm), flags);
 	if (!zstrm)
 		return NULL;
 
-	zstrm->private = comp->backend->create();
+	zstrm->private = comp->backend->create(flags);
 	/*
 	 * allocate 2 pages. 1 for compressed data, plus 1 extra for the
 	 * case when compressed size is larger than the original one
 	 */
-	zstrm->buffer = (void *)__get_free_pages(GFP_NOIO | __GFP_ZERO, 1);
+	zstrm->buffer = (void *)__get_free_pages(flags | __GFP_ZERO, 1);
 	if (!zstrm->private || !zstrm->buffer) {
 		zcomp_strm_free(comp, zstrm);
 		zstrm = NULL;
