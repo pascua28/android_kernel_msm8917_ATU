@@ -111,3 +111,4 @@ obj-$(CONFIG_QCOM_SMCINVOKE) += smcinvoke.o
 obj-$(CONFIG_QCOM_EARLY_RANDOM)	+= early_random.o
 obj-y += pil-q6v5-mss/
 obj-$(CONFIG_MSM_HAB) += hab/
+obj-$(CONFIG_STATE_NOTIFIER)		+= state_notifier.o
