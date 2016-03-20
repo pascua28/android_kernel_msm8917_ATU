@@ -917,6 +917,9 @@ config CPU_VOLTAGE_CONTROL
 	help
 	  This enables CPU Voltage Control.
 
+config STATE_NOTIFIER
+        bool "State Notifier"
+
 source "drivers/soc/qcom/memshare/Kconfig"
 source "drivers/soc/qcom/pil-q6v5-mss/Kconfig"
 
