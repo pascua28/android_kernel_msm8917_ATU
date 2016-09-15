@@ -2272,4 +2272,9 @@ task_rq_unlock(struct rq *rq, struct task_struct *p, unsigned long *flags)
 }
 #endif
 
+/*
+ * task_may_not_preempt - check whether a task may not be preemptible soon
+ */
+extern bool task_may_not_preempt(struct task_struct *task, int cpu);
+
 #endif /* CONFIG_SCHED_QHMP */
