@@ -30,7 +30,7 @@ static void swap_fn(struct work_struct *work);
 DECLARE_WORK(swap_work, swap_fn);
 
 /* User knob to enable/disable process reclaim feature */
-static int enable_process_reclaim;
+static int enable_process_reclaim = 1;
 module_param_named(enable_process_reclaim, enable_process_reclaim, int,
 	S_IRUGO | S_IWUSR);
 
@@ -45,8 +45,10 @@ module_param_named(reclaim_avg_efficiency, reclaim_avg_efficiency,
 /* The vmpressure region where process reclaim operates */
 static unsigned long pressure_min = 50;
 static unsigned long pressure_max = 90;
+static unsigned long process_reclaim_pressure = 0;
 module_param_named(pressure_min, pressure_min, ulong, S_IRUGO | S_IWUSR);
 module_param_named(pressure_max, pressure_max, ulong, S_IRUGO | S_IWUSR);
+module_param_named(process_reclaim_pressure, process_reclaim_pressure, ulong, 0444);
 
 static short min_score_adj = 360;
 module_param_named(min_score_adj, min_score_adj, short,
@@ -222,8 +224,13 @@ static int vmpressure_notifier(struct notifier_block *nb,
 {
 	unsigned long pressure = action;
 
-	if (!enable_process_reclaim)
+	if (!enable_process_reclaim) {
+		if (process_reclaim_pressure > 0)
+			process_reclaim_pressure = 0;
 		return 0;
+	}
+
+	process_reclaim_pressure = action;
 
 	if (!current_is_kswapd())
 		return 0;
