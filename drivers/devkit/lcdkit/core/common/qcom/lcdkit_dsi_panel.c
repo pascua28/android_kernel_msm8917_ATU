@@ -7,6 +7,10 @@
 #include "lcdkit_dbg.h"
 #include "huawei_ts_kit.h"
 
+#ifdef CONFIG_POWERSUSPEND
+#include <linux/powersuspend.h>
+#endif
+
 #define BLK_PAYLOAD_NUM_OFFSET	6
 #define BLK_PAYLOAD_NUM		0x03
 
@@ -376,6 +380,10 @@ end:
     /* add for timeout print log */
 	LCDKIT_INFO("exit panel_on_time = %u\n", jiffies_to_msecs(jiffies-timeout));
 
+#ifdef CONFIG_POWERSUSPEND
+       set_power_suspend_state_panel_hook(POWER_SUSPEND_INACTIVE);
+#endif
+
 
 #ifdef CONFIG_LOG_JANK
     LOG_JANK_D(JLID_KERNEL_LCD_POWER_ON, "%s", "JL_KERNEL_LCD_POWER_ON");
@@ -449,6 +457,10 @@ int mdss_dsi_panel_off(struct mdss_panel_data *pdata)
     lcdkit_info.panel_infos.inversion_mode = COLUMN_INVERSION;
 
 	LCDKIT_INFO("nomal exit: -\n");
+
+#ifdef CONFIG_POWERSUSPEND
+       set_power_suspend_state_panel_hook(POWER_SUSPEND_ACTIVE);
+#endif
 
 #ifdef CONFIG_LOG_JANK
     LOG_JANK_D(JLID_KERNEL_LCD_POWER_OFF, "%s", "JL_KERNEL_LCD_POWER_OFF");
