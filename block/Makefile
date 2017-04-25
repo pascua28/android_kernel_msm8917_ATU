@@ -24,3 +24,4 @@ obj-$(CONFIG_BLOCK_COMPAT)	+= compat_ioctl.o
 obj-$(CONFIG_BLK_CMDLINE_PARSER)	+= cmdline-parser.o
 obj-$(CONFIG_BLK_DEV_INTEGRITY) += bio-integrity.o blk-integrity.o t10-pi.o
 obj-$(CONFIG_HW_SYSTEM_WR_PROTECT) += software_system_wp.o
+obj-$(CONFIG_IOSCHED_SWITCHER) += iosched_switcher.o
