@@ -2935,6 +2935,7 @@ static struct binder_node *binder_get_node_refs_for_txn(
 		uint32_t *error)
 {
 	struct binder_node *target_node = NULL;
+
 	binder_node_inner_lock(node);
 	if (node->proc) {
 		target_node = node;
@@ -2945,6 +2946,7 @@ static struct binder_node *binder_get_node_refs_for_txn(
 	} else
 		*error = BR_DEAD_REPLY;
 	binder_node_inner_unlock(node);
+
 	return target_node;
 }
 
@@ -3492,7 +3494,6 @@ err_bad_call_stack:
 err_empty_call_stack:
 err_dead_binder:
 err_invalid_target_handle:
-err_no_context_mgr_node:
 	if (target_thread)
 		binder_thread_dec_tmpref(target_thread);
 	if (target_proc)
@@ -3501,6 +3502,7 @@ err_no_context_mgr_node:
 		binder_dec_node(target_node, 1, 0);
 		binder_dec_node_tmpref(target_node);
 	}
+
 	binder_debug(BINDER_DEBUG_FAILED_TRANSACTION,
 		     "%d:%d transaction failed %d/%d, size %lld-%lld line %d\n",
 		     proc->pid, thread->pid, return_error, return_error_param,
