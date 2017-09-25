@@ -2251,6 +2251,7 @@ static void binder_cleanup_transaction(struct binder_transaction *t,
 		binder_free_transaction(t);
 	}
 }
+
 /**
  * binder_validate_object() - checks for a valid metadata object in a buffer.
  * @buffer:	binder_buffer that we're parsing.
@@ -4372,16 +4373,20 @@ retry:
 		if (put_user(cmd, (uint32_t __user *)ptr)) {
 			if (t_from)
 				binder_thread_dec_tmpref(t_from);
+
 			binder_cleanup_transaction(t, "put_user failed",
 						   BR_FAILED_REPLY);
+
 			return -EFAULT;
 		}
 		ptr += sizeof(uint32_t);
 		if (copy_to_user(ptr, &tr, sizeof(tr))) {
 			if (t_from)
 				binder_thread_dec_tmpref(t_from);
+
 			binder_cleanup_transaction(t, "copy_to_user failed",
 						   BR_FAILED_REPLY);
+
 			return -EFAULT;
 		}
 		ptr += sizeof(tr);
@@ -4451,6 +4456,7 @@ static void binder_release_work(struct binder_proc *proc,
 			struct binder_transaction *t;
 
 			t = container_of(w, struct binder_transaction, work);
+
 			binder_cleanup_transaction(t, "process died.",
 						   BR_DEAD_REPLY);
 		} break;
