@@ -97,7 +97,7 @@
 
 		modem_mem: modem_region@0 {
 			compatible = "removed-dma-pool";
-			no-map-fixup;
+			no-map;
 			reg = <0x0 0x86800000 0x0 0x4D00000>;
 		};
 
