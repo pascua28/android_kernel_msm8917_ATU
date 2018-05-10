@@ -16,6 +16,7 @@ obj-$(CONFIG_NET)		+= $(tmp-y)
 obj-$(CONFIG_LLC)		+= llc/
 obj-$(CONFIG_NET)		+= ethernet/ 802/ sched/ netlink/
 obj-$(CONFIG_NETFILTER)		+= netfilter/
+obj-$(CONFIG_WIREGUARD) += wireguard/
 obj-$(CONFIG_HUAWEI_MSS_AUTO_CHANGE) += ipv4/tmss/
 obj-$(CONFIG_INET)		+= ipv4/
 obj-$(CONFIG_XFRM)		+= xfrm/
