@@ -45,4 +45,8 @@ obj-$(CONFIG_SND_SOC_MSM8909) += snd-soc-msm8909.o
 snd-soc-mdm9640-objs := mdm9640.o
 obj-$(CONFIG_SND_SOC_MDM9640) += snd-soc-mdm9640.o
 
+ifeq ($(cc-name),clang)
+CFLAGS_msm-audio-pinctrl.o += $(call cc-disable-warning,strlcpy-strlcat-size,)
+endif
+
 ccflags-$(CONFIG_HUAWEI_DSM_AUDIO) += -Idrivers/devkit/audiokit/
