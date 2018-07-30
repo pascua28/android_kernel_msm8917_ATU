@@ -222,6 +222,10 @@
 #include "gadget_chips.h"
 #include "configfs.h"
 
+#ifdef CONFIG_HUAWEI_USB
+#include <linux/usb/huawei_usb.h>
+#include <chipset_common/hwusb/hw_usb_rwswitch.h>
+#endif
 
 /*------------------------------------------------------------------------*/
 
@@ -239,6 +243,13 @@ static struct usb_string		fsg_strings[] = {
 	{}
 };
 
+#ifdef CONFIG_HUAWEI_USB
+#define SUITESTATE_INIT_VALUE       0xff
+#define SUITESTATE_LEN              1
+
+static int suitestate = SUITESTATE_INIT_VALUE;
+#endif
+
 static struct usb_gadget_strings	fsg_stringtab = {
 	.language	= 0x0409,		/* en-us */
 	.strings	= fsg_strings,
@@ -250,6 +261,20 @@ static struct usb_gadget_strings *fsg_strings_array[] = {
 };
 
 /*-------------------------------------------------------------------------*/
+
+/*
+ * If USB mass storage vfs operation is stuck for more than 10 sec
+ * host will initiate the reset. Configure the timer with 9 sec to print
+ * the error message before host is intiating the resume on it.
+ */
+#define MSC_VFS_TIMER_PERIOD_MS	9000
+static int msc_vfs_timer_period_ms = MSC_VFS_TIMER_PERIOD_MS;
+module_param(msc_vfs_timer_period_ms, int, S_IRUGO | S_IWUSR);
+MODULE_PARM_DESC(msc_vfs_timer_period_ms, "Set period for MSC VFS timer");
+
+static int write_error_after_csw_sent;
+static int must_report_residue;
+static int csw_sent;
 
 struct fsg_dev;
 struct fsg_common;
@@ -275,7 +300,6 @@ struct fsg_common {
 	struct fsg_buffhd	*next_buffhd_to_drain;
 	struct fsg_buffhd	*buffhds;
 	unsigned int		fsg_num_buffers;
-
 	int			cmnd_size;
 	u8			cmnd[MAX_COMMAND_SIZE];
 
@@ -312,13 +336,11 @@ struct fsg_common {
 	/* Gadget's private data. */
 	void			*private_data;
 
-	/*
-	 * Vendor (8 chars), product (16 chars), release (4
-	 * hexadecimal digits) and NUL byte
-	 */
-	char inquiry_string[8 + 16 + 4 + 1];
-
+	char inquiry_string[INQUIRY_MAX_LEN];
+	/* LUN name for sysfs purpose */
+	char name[FSG_MAX_LUNS][LUN_NAME_LEN];
 	struct kref		ref;
+	struct timer_list	vfs_timer;
 };
 
 struct fsg_dev {
@@ -338,6 +360,26 @@ struct fsg_dev {
 	struct usb_ep		*bulk_out;
 };
 
+static void msc_usb_vfs_timer_func(unsigned long data)
+{
+	struct fsg_common *common = (struct fsg_common *) data;
+
+	switch (common->data_dir) {
+	case DATA_DIR_FROM_HOST:
+		dev_err(&common->curlun->dev,
+				"usb mass storage stuck in vfs_write\n");
+		break;
+	case DATA_DIR_TO_HOST:
+		dev_err(&common->curlun->dev,
+				"usb mass storage stuck in vfs_read\n");
+		break;
+	default:
+		dev_err(&common->curlun->dev,
+				"usb mass storage stuck in vfs_sync\n");
+		break;
+	}
+}
+
 static inline int __fsg_is_set(struct fsg_common *common,
 			       const char *func, unsigned line)
 {
@@ -356,6 +398,7 @@ static inline struct fsg_dev *fsg_from_func(struct usb_function *f)
 }
 
 typedef void (*fsg_routine_t)(struct fsg_dev *);
+static int send_status(struct fsg_common *common);
 
 static int exception_in_progress(struct fsg_common *common)
 {
@@ -400,11 +443,7 @@ static int fsg_set_halt(struct fsg_dev *fsg, struct usb_ep *ep)
 /* Caller must hold fsg->lock */
 static void wakeup_thread(struct fsg_common *common)
 {
-	/*
-	 * Ensure the reading of thread_wakeup_needed
-	 * and the writing of bh->state are completed
-	 */
-	smp_mb();
+	smp_wmb();	/* ensure the write of bh->state is complete */
 	/* Tell the main thread that something has happened */
 	common->thread_wakeup_needed = 1;
 	if (common->thread_task)
@@ -459,13 +498,23 @@ static void bulk_in_complete(struct usb_ep *ep, struct usb_request *req)
 	struct fsg_buffhd	*bh = req->context;
 
 	if (req->status || req->actual != req->length)
-		DBG(common, "%s --> %d, %u/%u\n", __func__,
+		pr_debug("%s --> %d, %u/%u\n", __func__,
 		    req->status, req->actual, req->length);
 	if (req->status == -ECONNRESET)		/* Request was cancelled */
 		usb_ep_fifo_flush(ep);
 
 	/* Hold the lock while we update the request and buffer states */
 	smp_wmb();
+	/*
+	 * Disconnect and completion might race each other and driver data
+	 * is set to NULL during ep disable. So, add a check if that is case.
+	 */
+	if (!common) {
+		bh->inreq_busy = 0;
+		bh->state = BUF_STATE_EMPTY;
+		return;
+	}
+
 	spin_lock(&common->lock);
 	bh->inreq_busy = 0;
 	bh->state = BUF_STATE_EMPTY;
@@ -478,15 +527,24 @@ static void bulk_out_complete(struct usb_ep *ep, struct usb_request *req)
 	struct fsg_common	*common = ep->driver_data;
 	struct fsg_buffhd	*bh = req->context;
 
-	dump_msg(common, "bulk-out", req->buf, req->actual);
 	if (req->status || req->actual != bh->bulk_out_intended_length)
-		DBG(common, "%s --> %d, %u/%u\n", __func__,
+		pr_debug("%s --> %d, %u/%u\n", __func__,
 		    req->status, req->actual, bh->bulk_out_intended_length);
 	if (req->status == -ECONNRESET)		/* Request was cancelled */
 		usb_ep_fifo_flush(ep);
 
 	/* Hold the lock while we update the request and buffer states */
 	smp_wmb();
+	/*
+	 * Disconnect and completion might race each other and driver data
+	 * is set to NULL during ep disable. So, add a check if that is case.
+	 */
+	if (!common) {
+		bh->outreq_busy = 0;
+		return;
+	}
+
+	dump_msg(common, "bulk-out", req->buf, req->actual);
 	spin_lock(&common->lock);
 	bh->outreq_busy = 0;
 	bh->state = BUF_STATE_FULL;
@@ -619,18 +677,19 @@ static int sleep_thread(struct fsg_common *common, bool can_freeze)
 			rc = -EINTR;
 			break;
 		}
-		if (common->thread_wakeup_needed)
+		spin_lock_irq(&common->lock);
+		if (common->thread_wakeup_needed) {
+			spin_unlock_irq(&common->lock);
 			break;
+		}
+		spin_unlock_irq(&common->lock);
 		schedule();
 	}
 	__set_current_state(TASK_RUNNING);
+	spin_lock_irq(&common->lock);
 	common->thread_wakeup_needed = 0;
-
-	/*
-	 * Ensure the writing of thread_wakeup_needed
-	 * and the reading of bh->state are completed
-	 */
-	smp_mb();
+	spin_unlock_irq(&common->lock);
+	smp_rmb();	/* ensure the latest bh->state is visible */
 	return rc;
 }
 
@@ -647,7 +706,7 @@ static int do_read(struct fsg_common *common)
 	loff_t			file_offset, file_offset_tmp;
 	unsigned int		amount;
 	ssize_t			nread;
-
+	ktime_t			start, diff;
 	/*
 	 * Get the starting Logical Block Address and check that it's
 	 * not too big.
@@ -690,12 +749,17 @@ static int do_read(struct fsg_common *common)
 			     curlun->file_length - file_offset);
 
 		/* Wait for the next buffer to become available */
+		spin_lock_irq(&common->lock);
 		bh = common->next_buffhd_to_fill;
 		while (bh->state != BUF_STATE_EMPTY) {
+			spin_unlock_irq(&common->lock);
 			rc = sleep_thread(common, false);
 			if (rc)
 				return rc;
+
+			spin_lock_irq(&common->lock);
 		}
+		spin_unlock_irq(&common->lock);
 
 		/*
 		 * If we were asked to read past the end of file,
@@ -707,18 +771,27 @@ static int do_read(struct fsg_common *common)
 			curlun->sense_data_info =
 					file_offset >> curlun->blkbits;
 			curlun->info_valid = 1;
+			spin_lock_irq(&common->lock);
 			bh->inreq->length = 0;
 			bh->state = BUF_STATE_FULL;
+			spin_unlock_irq(&common->lock);
 			break;
 		}
 
 		/* Perform the read */
 		file_offset_tmp = file_offset;
+		start = ktime_get();
+		mod_timer(&common->vfs_timer, jiffies +
+			msecs_to_jiffies(msc_vfs_timer_period_ms));
 		nread = vfs_read(curlun->filp,
 				 (char __user *)bh->buf,
 				 amount, &file_offset_tmp);
+		del_timer_sync(&common->vfs_timer);
 		VLDBG(curlun, "file read %u @ %llu -> %d\n", amount,
 		      (unsigned long long)file_offset, (int)nread);
+		diff = ktime_sub(ktime_get(), start);
+		curlun->perf.rbytes += nread;
+		curlun->perf.rtime = ktime_add(curlun->perf.rtime, diff);
 		if (signal_pending(current))
 			return -EINTR;
 
@@ -739,8 +812,10 @@ static int do_read(struct fsg_common *common)
 		 * equal to the buffer size, which is divisible by the
 		 * bulk-in maxpacket size.
 		 */
+		spin_lock_irq(&common->lock);
 		bh->inreq->length = nread;
 		bh->state = BUF_STATE_FULL;
+		spin_unlock_irq(&common->lock);
 
 		/* If an error occurred, report it and its position */
 		if (nread < amount) {
@@ -778,7 +853,8 @@ static int do_write(struct fsg_common *common)
 	loff_t			usb_offset, file_offset, file_offset_tmp;
 	unsigned int		amount;
 	ssize_t			nwritten;
-	int			rc;
+	ktime_t			start, diff;
+	int			rc, i;
 
 	if (curlun->ro) {
 		curlun->sense_data = SS_WRITE_PROTECTED;
@@ -872,7 +948,13 @@ static int do_write(struct fsg_common *common)
 		bh = common->next_buffhd_to_drain;
 		if (bh->state == BUF_STATE_EMPTY && !get_some_more)
 			break;			/* We stopped early */
-		if (bh->state == BUF_STATE_FULL) {
+		/*
+		 * If the csw packet is already submmitted to the hardware,
+		 * by marking the state of buffer as full, then by checking
+		 * the residue, we make sure that this csw packet is not
+		 * written on to the storage media.
+		 */
+		if (bh->state == BUF_STATE_FULL && common->residue) {
 			smp_rmb();
 			common->next_buffhd_to_drain = bh->next;
 			bh->state = BUF_STATE_EMPTY;
@@ -907,11 +989,19 @@ static int do_write(struct fsg_common *common)
 
 			/* Perform the write */
 			file_offset_tmp = file_offset;
+			start = ktime_get();
+			mod_timer(&common->vfs_timer, jiffies +
+				msecs_to_jiffies(msc_vfs_timer_period_ms));
 			nwritten = vfs_write(curlun->filp,
 					     (char __user *)bh->buf,
 					     amount, &file_offset_tmp);
+			del_timer_sync(&common->vfs_timer);
 			VLDBG(curlun, "file write %u @ %llu -> %d\n", amount,
 			      (unsigned long long)file_offset, (int)nwritten);
+			diff = ktime_sub(ktime_get(), start);
+			curlun->perf.wbytes += nwritten;
+			curlun->perf.wtime =
+					ktime_add(curlun->perf.wtime, diff);
 			if (signal_pending(current))
 				return -EINTR;		/* Interrupted! */
 
@@ -934,9 +1024,42 @@ static int do_write(struct fsg_common *common)
 				curlun->sense_data_info =
 					file_offset >> curlun->blkbits;
 				curlun->info_valid = 1;
+				write_error_after_csw_sent = 1;
+				goto write_error;
 				break;
 			}
+write_error:
+			if ((nwritten == amount) && !csw_sent) {
+				if (write_error_after_csw_sent)
+					break;
 
+				/*
+				 * If residue still exists and nothing left to
+				 * write, device must send correct residue to
+				 * host in this case.
+				 */
+				if (!amount_left_to_write && common->residue) {
+					must_report_residue = 1;
+					break;
+				}
+				/*
+				 * Check if any of the buffer is in the
+				 * busy state, if any buffer is in busy state,
+				 * means the complete data is not received
+				 * yet from the host. So there is no point in
+				 * csw right away without the complete data.
+				 */
+				for (i = 0; i < common->fsg_num_buffers; i++) {
+					if (common->buffhds[i].state ==
+							BUF_STATE_BUSY)
+						break;
+				}
+				if (!amount_left_to_req &&
+						i == common->fsg_num_buffers) {
+					csw_sent = 1;
+					send_status(common);
+				}
+			}
  empty_write:
 			/* Did the host decide to stop early? */
 			if (bh->outreq->actual < bh->bulk_out_intended_length) {
@@ -965,9 +1088,12 @@ static int do_synchronize_cache(struct fsg_common *common)
 
 	/* We ignore the requested LBA and write out all file's
 	 * dirty data buffers. */
+	mod_timer(&common->vfs_timer, jiffies +
+		msecs_to_jiffies(msc_vfs_timer_period_ms));
 	rc = fsg_lun_fsync_sub(curlun);
 	if (rc)
 		curlun->sense_data = SS_WRITE_ERROR;
+	del_timer_sync(&common->vfs_timer);
 	return 0;
 }
 
@@ -1023,7 +1149,10 @@ static int do_verify(struct fsg_common *common)
 	file_offset = ((loff_t) lba) << curlun->blkbits;
 
 	/* Write out all the dirty buffers before invalidating them */
+	mod_timer(&common->vfs_timer, jiffies +
+			msecs_to_jiffies(msc_vfs_timer_period_ms));
 	fsg_lun_fsync_sub(curlun);
+	del_timer_sync(&common->vfs_timer);
 	if (signal_pending(current))
 		return -EINTR;
 
@@ -1053,9 +1182,12 @@ static int do_verify(struct fsg_common *common)
 
 		/* Perform the read */
 		file_offset_tmp = file_offset;
+		mod_timer(&common->vfs_timer, jiffies +
+				msecs_to_jiffies(msc_vfs_timer_period_ms));
 		nread = vfs_read(curlun->filp,
 				(char __user *) bh->buf,
 				amount, &file_offset_tmp);
+		del_timer_sync(&common->vfs_timer);
 		VLDBG(curlun, "file read %u @ %llu -> %d\n", amount,
 				(unsigned long long) file_offset,
 				(int) nread);
@@ -1205,6 +1337,8 @@ static int do_read_header(struct fsg_common *common, struct fsg_buffhd *bh)
 	return 8;
 }
 
+
+#ifndef CONFIG_HUAWEI_USB
 static int do_read_toc(struct fsg_common *common, struct fsg_buffhd *bh)
 {
 	struct fsg_lun	*curlun = common->curlun;
@@ -1231,6 +1365,121 @@ static int do_read_toc(struct fsg_common *common, struct fsg_buffhd *bh)
 	store_cdrom_address(&buf[16], msf, curlun->num_sectors);
 	return 20;
 }
+#else
+/* usbsdms_read_toc_data1 rsp packet */
+static u8 usbsdms_read_toc_data1[] = 
+{
+    0x00,0x0A,0x01,0x01,
+    0x00,0x14,0x01,0x00,0x00,0x00,0x02,0x00
+};
+
+/* usbsdms_read_toc_data1_format0000 rsp packet */
+static  u8 usbsdms_read_toc_data1_format0000[] = 
+{
+    0x00,0x12,0x01,0x01,
+    0x00,0x14,0x01,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x14,0xAA,0x00,0x00,0x00,0xFF,0xFF /* the last four bytes:32MB */
+};
+
+/* usbsdms_read_toc_data1_format0001 rsp packet */
+static u8 usbsdms_read_toc_data1_format0001[] = 
+{
+    0x00,0x0A,0x01,0x01,
+    0x00,0x14,0x01,0x00,0x00,0x00,0x00,0x00
+};
+
+/* usbsdms_read_toc_data2 rsp packet */
+static u8 usbsdms_read_toc_data2[] = 
+{
+    0x00,0x2e,0x01,0x01,
+    0x01,0x14,0x00,0xa0,0x00,0x00,0x00,0x00,0x01,0x00,0x00,
+    0x01,0x14,0x00,0xa1,0x00,0x00,0x00,0x00,0x01,0x00,0x00,
+    0x01,0x14,0x00,0xa2,0x00,0x00,0x00,0x00,0x06,0x00,0x3c,
+                                         /* ^ CDROM size from this byte */
+    0x01,0x14,0x00,0x01,0x00,0x00,0x00,0x00,0x00,0x02,0x00
+};
+
+/* usbsdms_read_toc_data3 rsp packet */
+static u8 usbsdms_read_toc_data3[] = 
+{
+    0x00,0x12,0x01,0x01,
+    0x00,0x14,0x01,0x00,0x00,0x00,0x02,0x00,
+    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
+};
+
+/* ------------------------------------------------------------
+ * function      : static int do_read_toc(struct fsg_dev *fsg, struct fsg_buffhd *bh)
+ * description   : response for command READ TOC
+ * input         : struct fsg_dev *fsg, struct fsg_buffhd *bh
+ * output        : none
+ * return        : response data length
+ * -------------------------------------------------------------
+ */
+static int do_read_toc(struct fsg_common *common, struct fsg_buffhd *bh)
+{
+	if((!common)||(!bh))
+		return  -EINVAL;
+    u8    *buf = (u8 *) bh->buf;
+    usbsdms_read_toc_cmd_type *read_toc_cmd = NULL;
+    unsigned long response_length = 0;
+    u8 *response_ptr = NULL;
+
+    read_toc_cmd = (usbsdms_read_toc_cmd_type *)common->cmnd;
+
+    /* When TIME is set to one, the address fields in some returned
+     * data formats shall be in TIME form.
+     * 2 is time form mask.
+     */
+    if ( 2 == read_toc_cmd->msf )
+    {
+        response_ptr = usbsdms_read_toc_data2;
+        response_length = sizeof(usbsdms_read_toc_data2);
+    }
+    else if(0 != read_toc_cmd->allocation_length_msb)
+    {
+        response_ptr = usbsdms_read_toc_data3;
+        response_length = sizeof(usbsdms_read_toc_data3);
+    }
+    else
+    {
+        /* When TIME is set to zero, the address fields in some returned
+         * data formats shall be in LBA form.
+         */
+        if(0 == read_toc_cmd->format)
+        {
+            /* 0 is mean to valid as a Track Number */
+            response_ptr = usbsdms_read_toc_data1_format0000;
+            response_length = sizeof(usbsdms_read_toc_data1_format0000);
+        }
+        else if(1 == read_toc_cmd->format)
+        {
+            /* 1 is mean to ignored by Logical Unit */
+            response_ptr = usbsdms_read_toc_data1_format0001;
+            response_length = sizeof(usbsdms_read_toc_data1_format0001);
+        }
+        else
+        {
+            /* Valid as a Session Number */
+            response_ptr = usbsdms_read_toc_data1;
+            response_length = sizeof(usbsdms_read_toc_data1);
+        }
+    }
+
+    memcpy(buf, response_ptr, response_length);
+
+    if(response_length < common->data_size_from_cmnd)
+    {
+        common->data_size_from_cmnd =response_length;
+    }
+
+    common->data_size = common->data_size_from_cmnd;
+
+    common->residue = common->usb_amount_left = common->data_size;
+
+    return response_length;
+}
+#endif
+
 
 static int do_mode_sense(struct fsg_common *common, struct fsg_buffhd *bh)
 {
@@ -1279,6 +1528,7 @@ static int do_mode_sense(struct fsg_common *common, struct fsg_buffhd *bh)
 	 * The mode pages, in numerical order.  The only page we support
 	 * is the Caching page.
 	 */
+#ifndef CONFIG_HUAWEI_USB
 	if (page_code == 0x08 || all_pages) {
 		valid_page = 1;
 		buf[0] = 0x08;		/* Page code */
@@ -1299,6 +1549,9 @@ static int do_mode_sense(struct fsg_common *common, struct fsg_buffhd *bh)
 		}
 		buf += 12;
 	}
+#else
+	valid_page=1;//set valid page
+#endif
 
 	/*
 	 * Check that a valid page was requested and the mode data length
@@ -1386,8 +1639,12 @@ static int do_prevent_allow(struct fsg_common *common)
 		return -EINVAL;
 	}
 
-	if (curlun->prevent_medium_removal && !prevent)
+	if (!curlun->nofua && curlun->prevent_medium_removal && !prevent) {
+		mod_timer(&common->vfs_timer, jiffies +
+			msecs_to_jiffies(msc_vfs_timer_period_ms));
 		fsg_lun_fsync_sub(curlun);
+		del_timer_sync(&common->vfs_timer);
+	}
 	curlun->prevent_medium_removal = prevent;
 	return 0;
 }
@@ -1467,6 +1724,44 @@ static int wedge_bulk_in_endpoint(struct fsg_dev *fsg)
 	return rc;
 }
 
+/* to solve the problem that some host reset usb ports continuously
+ * when there is cdrom
+ */
+#ifdef CONFIG_HUAWEI_USB
+static int pad_with_zeros(struct fsg_dev *fsg)
+{
+	if (!fsg)
+		return -EINVAL;
+
+	struct fsg_buffhd	*bh = fsg->common->next_buffhd_to_fill;
+	u32			nkeep = bh->inreq->length;
+	u32			nsend;
+	int			rc;
+
+	bh->state = BUF_STATE_EMPTY;		/* For the first iteration */
+	fsg->common->usb_amount_left = nkeep + fsg->common->residue;
+	while (fsg->common->usb_amount_left > 0) {
+
+		/* Wait for the next buffer to be free */
+		while (bh->state != BUF_STATE_EMPTY) {
+			rc = sleep_thread(fsg->common,true);
+			if (rc)
+				return rc;
+		}
+
+		nsend = min(fsg->common->usb_amount_left, FSG_BUFLEN);
+		memset(bh->buf + nkeep, 0, nsend - nkeep);
+		bh->inreq->length = nsend;
+		bh->inreq->zero = 0;
+		start_transfer(fsg, fsg->bulk_in, bh->inreq,
+			       &bh->inreq_busy, &bh->state);
+		bh = fsg->common->next_buffhd_to_fill = bh->next;
+		fsg->common->usb_amount_left -= nsend;
+		nkeep = 0;
+	}
+	return 0;
+}
+#endif
 static int throw_away_data(struct fsg_common *common)
 {
 	struct fsg_buffhd	*bh;
@@ -1523,6 +1818,8 @@ static int throw_away_data(struct fsg_common *common)
 
 static int finish_reply(struct fsg_common *common)
 {
+	if(!common)
+		return -EIO;
 	struct fsg_buffhd	*bh = common->next_buffhd_to_fill;
 	int			rc = 0;
 
@@ -1550,6 +1847,41 @@ static int finish_reply(struct fsg_common *common)
 
 	/* All but the last buffer of data must have already been sent */
 	case DATA_DIR_TO_HOST:
+        /* to solve the problem that some host reset usb ports continuously 
+         * when there is cdrom
+         */
+#ifdef CONFIG_HUAWEI_USB
+		if (common->data_size == 0) {
+			/* Nothing to send */
+
+		/* If there's no residue, simply send the last buffer */
+		} else if (common->residue == 0) {
+			bh->inreq->zero = 0;
+			if (!start_in_transfer(common, bh))
+				return -EIO;
+			common->next_buffhd_to_fill = bh->next;
+
+		/*
+		 * For Bulk-only, if we're allowed to stall then send the
+		 * short packet and halt the bulk-in endpoint.  If we can't
+		 * stall, pad out the remaining data with 0's.
+		 */
+		} else if (common->can_stall) {
+			bh->inreq->zero = 1;//bh inreq to 1
+			if (!start_in_transfer(common, bh))
+				/* Don't know what to do if
+				 * common->fsg is NULL */
+				rc = -EIO;
+			common->next_buffhd_to_fill = bh->next;
+			if (common->fsg)
+				rc = halt_bulk_in_endpoint(common->fsg);
+		} else if (fsg_is_set(common)) {
+			rc = pad_with_zeros(common->fsg);
+		} else {
+			/* Don't know what to do if common->fsg is NULL */
+			rc = -EIO;
+		}
+#else
 		if (common->data_size == 0) {
 			/* Nothing to send */
 
@@ -1579,6 +1911,7 @@ static int finish_reply(struct fsg_common *common)
 			if (common->can_stall)
 				rc = halt_bulk_in_endpoint(common->fsg);
 		}
+#endif
 		break;
 
 	/*
@@ -1633,12 +1966,17 @@ static int send_status(struct fsg_common *common)
 	u32			sd, sdinfo = 0;
 
 	/* Wait for the next buffer to become available */
+	spin_lock_irq(&common->lock);
 	bh = common->next_buffhd_to_fill;
 	while (bh->state != BUF_STATE_EMPTY) {
+		spin_unlock_irq(&common->lock);
 		rc = sleep_thread(common, true);
 		if (rc)
 			return rc;
+
+		spin_lock_irq(&common->lock);
 	}
+	spin_unlock_irq(&common->lock);
 
 	if (curlun) {
 		sd = curlun->sense_data;
@@ -1666,6 +2004,17 @@ static int send_status(struct fsg_common *common)
 	csw->Signature = cpu_to_le32(US_BULK_CS_SIGN);
 	csw->Tag = common->tag;
 	csw->Residue = cpu_to_le32(common->residue);
+	/*
+	 * Since csw is being sent early, before
+	 * writing on to storage media, need to set
+	 * residue to zero,assuming that write will succeed.
+	 */
+	if (write_error_after_csw_sent || must_report_residue) {
+		write_error_after_csw_sent = 0;
+		must_report_residue = 0;
+	}
+	else
+		csw->Residue = 0;
 	csw->Status = status;
 
 	bh->inreq->length = US_BULK_CS_WRAP_LEN;
@@ -1812,6 +2161,16 @@ static int check_command(struct fsg_common *common, int cmnd_size,
 
 	return 0;
 }
+#ifdef CONFIG_HUAWEI_USB
+static int do_get_suitestate(struct fsg_common *common, struct fsg_buffhd *bh)
+{
+	if((!common)||(!bh))
+		return -EINVAL; 
+    u8 *buf = (u8* )bh->buf;
+    buf[0] = suitestate;
+    return SUITESTATE_LEN;
+}
+#endif
 
 /* wrapper of check_command for data size in blocks handling */
 static int check_command_size_in_blocks(struct fsg_common *common,
@@ -1823,9 +2182,12 @@ static int check_command_size_in_blocks(struct fsg_common *common,
 	return check_command(common, cmnd_size, data_dir,
 			mask, needs_medium, name);
 }
-
+#define  CD_ROM_LUN      1
+#define  CD_CMD        0x01
 static int do_scsi_command(struct fsg_common *common)
 {
+	if(!common)
+		return -EINVAL;
 	struct fsg_buffhd	*bh;
 	int			rc;
 	int			reply = -EINVAL;
@@ -1835,13 +2197,19 @@ static int do_scsi_command(struct fsg_common *common)
 	dump_cdb(common);
 
 	/* Wait for the next buffer to become available for data or status */
+	spin_lock_irq(&common->lock);
 	bh = common->next_buffhd_to_fill;
 	common->next_buffhd_to_drain = bh;
 	while (bh->state != BUF_STATE_EMPTY) {
+		spin_unlock_irq(&common->lock);
 		rc = sleep_thread(common, true);
 		if (rc)
 			return rc;
+
+		spin_lock_irq(&common->lock);
 	}
+	spin_unlock_irq(&common->lock);
+
 	common->phase_error = 0;
 	common->short_packet_received = 0;
 
@@ -1856,6 +2224,18 @@ static int do_scsi_command(struct fsg_common *common)
 		if (reply == 0)
 			reply = do_inquiry(common, bh);
 		break;
+#ifdef CONFIG_HUAWEI_USB
+	/* deal with the scsi command from Hisuite on the PC */
+    case SEEK_6:
+        common->data_size_from_cmnd = 1;//cd rom command
+        if(common->cmnd[1] == CD_CMD && common->curlun->cdrom == CD_ROM_LUN)
+        {
+            reply = do_get_suitestate(common, bh);
+        }
+        common->residue = reply;
+        common->usb_amount_left = reply;
+        break;
+#endif
 
 	case MODE_SELECT:
 		common->data_size_from_cmnd = common->cmnd[4];
@@ -1964,7 +2344,11 @@ static int do_scsi_command(struct fsg_common *common)
 		common->data_size_from_cmnd =
 			get_unaligned_be16(&common->cmnd[7]);
 		reply = check_command(common, 10, DATA_DIR_TO_HOST,
+#ifndef CONFIG_HUAWEI_USB
 				      (7<<6) | (1<<1), 1,
+#else
+				      (3<<1) | (7<<7), 1,    //READ TOC DATA TO HOST COMMAND BIT1 BIT2 BIT5 BIT6 BIT7 
+#endif
 				      "READ TOC");
 		if (reply == 0)
 			reply = do_read_toc(common, bh);
@@ -2059,7 +2443,16 @@ static int do_scsi_command(struct fsg_common *common)
 		if (reply == 0)
 			reply = do_write(common);
 		break;
-
+#ifdef CONFIG_HUAWEI_USB
+    case SC_REWIND:
+    case SC_REWIND_11:
+        printk("do rewind: cmdsize = %d\n", common->cmnd_size);
+        /* when rework in manufacture, if the phone is in google ports mode,
+         * we need to switch it to multi-ports mode for using the diag.
+         */
+        hw_usb_port_switch_request(14);
+        break;
+#endif
 	/*
 	 * Some mandatory commands that we recognize but don't implement.
 	 * They don't mean much in this setting.  It's left as an exercise
@@ -2182,12 +2575,17 @@ static int get_next_command(struct fsg_common *common)
 	int			rc = 0;
 
 	/* Wait for the next buffer to become available */
+	spin_lock_irq(&common->lock);
 	bh = common->next_buffhd_to_fill;
 	while (bh->state != BUF_STATE_EMPTY) {
+		spin_unlock_irq(&common->lock);
 		rc = sleep_thread(common, true);
 		if (rc)
 			return rc;
+
+		spin_lock_irq(&common->lock);
 	}
+	spin_unlock_irq(&common->lock);
 
 	/* Queue a request to read a Bulk-only CBW */
 	set_bulk_out_req_length(common, bh, US_BULK_CB_WRAP_LEN);
@@ -2202,14 +2600,23 @@ static int get_next_command(struct fsg_common *common)
 	 */
 
 	/* Wait for the CBW to arrive */
+	spin_lock_irq(&common->lock);
 	while (bh->state != BUF_STATE_FULL) {
+		spin_unlock_irq(&common->lock);
 		rc = sleep_thread(common, true);
 		if (rc)
 			return rc;
+
+		spin_lock_irq(&common->lock);
 	}
+	spin_unlock_irq(&common->lock);
+
 	smp_rmb();
 	rc = fsg_is_set(common) ? received_cbw(common->fsg, bh) : -EIO;
+
+	spin_lock_irq(&common->lock);
 	bh->state = BUF_STATE_EMPTY;
+	spin_unlock_irq(&common->lock);
 
 	return rc;
 }
@@ -2254,18 +2661,6 @@ reset:
 			}
 		}
 
-		/* Disable the endpoints */
-		if (fsg->bulk_in_enabled) {
-			usb_ep_disable(fsg->bulk_in);
-			fsg->bulk_in->driver_data = NULL;
-			fsg->bulk_in_enabled = 0;
-		}
-		if (fsg->bulk_out_enabled) {
-			usb_ep_disable(fsg->bulk_out);
-			fsg->bulk_out->driver_data = NULL;
-			fsg->bulk_out_enabled = 0;
-		}
-
 		common->fsg = NULL;
 		wake_up(&common->fsg_wait);
 	}
@@ -2276,28 +2671,6 @@ reset:
 
 	common->fsg = new_fsg;
 	fsg = common->fsg;
-
-	/* Enable the endpoints */
-	rc = config_ep_by_speed(common->gadget, &(fsg->function), fsg->bulk_in);
-	if (rc)
-		goto reset;
-	rc = usb_ep_enable(fsg->bulk_in);
-	if (rc)
-		goto reset;
-	fsg->bulk_in->driver_data = common;
-	fsg->bulk_in_enabled = 1;
-
-	rc = config_ep_by_speed(common->gadget, &(fsg->function),
-				fsg->bulk_out);
-	if (rc)
-		goto reset;
-	rc = usb_ep_enable(fsg->bulk_out);
-	if (rc)
-		goto reset;
-	fsg->bulk_out->driver_data = common;
-	fsg->bulk_out_enabled = 1;
-	common->bulk_out_maxpacket = usb_endpoint_maxp(fsg->bulk_out->desc);
-	clear_bit(IGNORE_BULK_OUT, &fsg->atomic_bitflags);
 
 	/* Allocate the requests */
 	for (i = 0; i < common->fsg_num_buffers; ++i) {
@@ -2329,14 +2702,63 @@ reset:
 static int fsg_set_alt(struct usb_function *f, unsigned intf, unsigned alt)
 {
 	struct fsg_dev *fsg = fsg_from_func(f);
+	struct fsg_common *common = fsg->common;
+	int rc;
+
+	/* Enable the endpoints */
+	rc = config_ep_by_speed(common->gadget, &(fsg->function), fsg->bulk_in);
+	if (rc)
+		goto err_exit;
+	rc = usb_ep_enable(fsg->bulk_in);
+	if (rc)
+		goto err_exit;
+	fsg->bulk_in->driver_data = common;
+	fsg->bulk_in_enabled = 1;
+
+	rc = config_ep_by_speed(common->gadget, &(fsg->function),
+				fsg->bulk_out);
+	if (rc)
+		goto reset_bulk_int;
+
+	rc = usb_ep_enable(fsg->bulk_out);
+	if (rc)
+		goto reset_bulk_int;
+
+	fsg->bulk_out->driver_data = common;
+	fsg->bulk_out_enabled = 1;
+	common->bulk_out_maxpacket = usb_endpoint_maxp(fsg->bulk_out->desc);
+	clear_bit(IGNORE_BULK_OUT, &fsg->atomic_bitflags);
+	csw_sent = 0;
+	write_error_after_csw_sent = 0;
+
 	fsg->common->new_fsg = fsg;
 	raise_exception(fsg->common, FSG_STATE_CONFIG_CHANGE);
 	return USB_GADGET_DELAYED_STATUS;
+
+reset_bulk_int:
+	usb_ep_disable(fsg->bulk_in);
+	fsg->bulk_in_enabled = 0;
+err_exit:
+	return rc;
 }
 
 static void fsg_disable(struct usb_function *f)
 {
 	struct fsg_dev *fsg = fsg_from_func(f);
+
+	/* Disable the endpoints */
+	if (fsg->bulk_in_enabled) {
+		usb_ep_disable(fsg->bulk_in);
+		fsg->bulk_in->driver_data = NULL;
+		fsg->bulk_in_enabled = 0;
+	}
+
+	if (fsg->bulk_out_enabled) {
+		usb_ep_disable(fsg->bulk_out);
+		fsg->bulk_out->driver_data = NULL;
+		fsg->bulk_out_enabled = 0;
+	}
+
 	fsg->common->new_fsg = NULL;
 	raise_exception(fsg->common, FSG_STATE_CONFIG_CHANGE);
 }
@@ -2352,6 +2774,7 @@ static void handle_exception(struct fsg_common *common)
 	enum fsg_state		old_state;
 	struct fsg_lun		*curlun;
 	unsigned int		exception_req_tag;
+	unsigned long		flags;
 
 	/*
 	 * Clear the existing signals.  Anything but SIGUSR1 is converted
@@ -2365,6 +2788,10 @@ static void handle_exception(struct fsg_common *common)
 		if (sig != SIGUSR1) {
 			if (common->state < FSG_STATE_EXIT)
 				DBG(common, "Main thread exiting on signal\n");
+
+			WARN_ON(1);
+			pr_err("%s: signal(%d) received from PID(%d) UID(%d)\n",
+				__func__, sig, info.si_pid, info.si_uid);
 			raise_exception(common, FSG_STATE_EXIT);
 		}
 	}
@@ -2383,10 +2810,13 @@ static void handle_exception(struct fsg_common *common)
 		/* Wait until everything is idle */
 		for (;;) {
 			int num_active = 0;
+			spin_lock_irq(&common->lock);
 			for (i = 0; i < common->fsg_num_buffers; ++i) {
 				bh = &common->buffhds[i];
 				num_active += bh->inreq_busy + bh->outreq_busy;
 			}
+			spin_unlock_irq(&common->lock);
+
 			if (num_active == 0)
 				break;
 			if (sleep_thread(common, true))
@@ -2404,7 +2834,7 @@ static void handle_exception(struct fsg_common *common)
 	 * Reset the I/O buffer states and pointers, the SCSI
 	 * state, and the exception.  Then invoke the handler.
 	 */
-	spin_lock_irq(&common->lock);
+	spin_lock_irqsave(&common->lock, flags);
 
 	for (i = 0; i < common->fsg_num_buffers; ++i) {
 		bh = &common->buffhds[i];
@@ -2430,7 +2860,7 @@ static void handle_exception(struct fsg_common *common)
 		}
 		common->state = FSG_STATE_IDLE;
 	}
-	spin_unlock_irq(&common->lock);
+	spin_unlock_irqrestore(&common->lock, flags);
 
 	/* Carry out any extra actions required for the exception */
 	switch (old_state) {
@@ -2454,9 +2884,13 @@ static void handle_exception(struct fsg_common *common)
 				       &common->fsg->atomic_bitflags))
 			usb_ep_clear_halt(common->fsg->bulk_in);
 
-		if (common->ep0_req_tag == exception_req_tag)
-			ep0_queue(common);	/* Complete the status stage */
-
+		if (common->ep0_req_tag == exception_req_tag) {
+			/* Complete the status stage */
+			if (common->cdev)
+				usb_composite_setup_continue(common->cdev);
+			else
+				ep0_queue(common);
+		}
 		/*
 		 * Technically this should go here, but it would only be
 		 * a waste of time.  Ditto for the INTERFACE_CHANGE and
@@ -2546,6 +2980,15 @@ static int fsg_main_thread(void *common_)
 			common->state = FSG_STATE_STATUS_PHASE;
 		spin_unlock_irq(&common->lock);
 
+		/*
+		 * Since status is already sent for write scsi command,
+		 * need to skip sending status once again if it is a
+		 * write scsi command.
+		 */
+		if (csw_sent) {
+			csw_sent = 0;
+			continue;
+		}
 		if (send_status(common))
 			continue;
 
@@ -2636,6 +3079,7 @@ static ssize_t file_store(struct device *dev, struct device_attribute *attr,
 static DEVICE_ATTR_RW(ro);
 static DEVICE_ATTR_RW(nofua);
 static DEVICE_ATTR_RW(file);
+static DEVICE_ATTR(perf, 0644, fsg_show_perf, fsg_store_perf);
 
 static struct device_attribute dev_attr_ro_cdrom = __ATTR_RO(ro);
 static struct device_attribute dev_attr_file_nonremovable = __ATTR_RO(file);
@@ -2714,6 +3158,10 @@ int fsg_common_set_num_buffers(struct fsg_common *common, unsigned int n)
 {
 	struct fsg_buffhd *bh, *buffhds;
 	int i, rc;
+	size_t extra_buf_alloc = 0;
+
+	if (common->gadget)
+		extra_buf_alloc = common->gadget->extra_buf_alloc;
 
 	rc = fsg_num_buffers_validate(n);
 	if (rc != 0)
@@ -2731,7 +3179,8 @@ int fsg_common_set_num_buffers(struct fsg_common *common, unsigned int n)
 		bh->next = bh + 1;
 		++bh;
 buffhds_first_it:
-		bh->buf = kmalloc(FSG_BUFLEN, GFP_KERNEL);
+		bh->buf = kmalloc(FSG_BUFLEN + extra_buf_alloc,
+				GFP_KERNEL);
 		if (unlikely(!bh->buf))
 			goto error_release;
 	} while (--i);
@@ -2780,6 +3229,7 @@ static inline void fsg_common_remove_sysfs(struct fsg_lun *lun)
 	 */
 	device_remove_file(&lun->dev, &dev_attr_ro);
 	device_remove_file(&lun->dev, &dev_attr_file);
+	device_remove_file(&lun->dev, &dev_attr_perf);
 }
 
 void fsg_common_remove_lun(struct fsg_lun *lun, bool sysfs)
@@ -2812,9 +3262,14 @@ void fsg_common_remove_luns(struct fsg_common *common)
 
 void fsg_common_free_luns(struct fsg_common *common)
 {
+	unsigned long flags;
+
 	fsg_common_remove_luns(common);
+	spin_lock_irqsave(&common->lock, flags);
 	kfree(common->luns);
 	common->luns = NULL;
+	common->nluns = 0;
+	spin_unlock_irqrestore(&common->lock, flags);
 }
 EXPORT_SYMBOL_GPL(fsg_common_free_luns);
 
@@ -2913,6 +3368,10 @@ static inline int fsg_common_add_sysfs(struct fsg_common *common,
 	if (rc)
 		goto error;
 
+	rc = device_create_file(&lun->dev, &dev_attr_perf);
+	if (rc)
+		pr_err("failed to create sysfs entry: %d\n", rc);
+
 	return 0;
 
 error:
@@ -3009,6 +3468,32 @@ error_sysfs:
 }
 EXPORT_SYMBOL_GPL(fsg_common_create_lun);
 
+#ifdef CONFIG_HUAWEI_USB
+void fsg_close_all_file(struct fsg_common *common)
+{
+	if(!common)
+		return;
+    down_write(&common->filesem);
+    if (likely(common->luns)) {
+        struct fsg_lun *lun = common->luns[0];
+        unsigned i = common->nluns;
+
+        /* In error recovery nluns may be zero. */
+        for (; i; --i, ++lun) {
+            fsg_lun_close(lun);
+            lun->unit_attention_data = SS_MEDIUM_NOT_PRESENT;
+            /* clear the cdrom flag when we switch the usb ports mode
+             * 0 - the lun is cdrom; 1 - the lun is udisk
+             * the cdrom flag is used in fsg_lun_open() to get the blksize
+             */
+        }
+    }
+    /* protect the luns rw_semaphore */
+    up_write(&common->filesem);
+}
+EXPORT_SYMBOL_GPL(fsg_close_all_file);
+#endif
+
 int fsg_common_create_luns(struct fsg_common *common, struct fsg_config *cfg)
 {
 	char buf[8]; /* enough for 100000000 different numbers, decimal */
@@ -3102,6 +3587,43 @@ static void fsg_common_release(struct kref *ref)
 		kfree(common);
 }
 
+int fsg_sysfs_update(struct fsg_common *common, struct device *dev, bool create)
+{
+	int ret = 0, i;
+
+	pr_debug("%s(): common->nluns:%d\n", __func__, common->nluns);
+	if (create) {
+		for (i = 0; i < common->nluns; i++) {
+			if (i == 0)
+				snprintf(common->name[i], 8, "lun");
+			else
+				snprintf(common->name[i], 8, "lun%d", i-1);
+			ret = sysfs_create_link(&dev->kobj,
+					&common->luns[i]->dev.kobj,
+					common->name[i]);
+			if (ret) {
+				pr_err("%s(): failed creating sysfs:%d %s)\n",
+						__func__, i, common->name[i]);
+				goto remove_sysfs;
+			}
+		}
+	} else {
+		i = common->nluns;
+		goto remove_sysfs;
+	}
+
+	return 0;
+
+remove_sysfs:
+	for (; i > 0; i--) {
+		pr_debug("%s(): delete sysfs for lun(id:%d)(name:%s)\n",
+					__func__, i, common->name[i-1]);
+		sysfs_remove_link(&dev->kobj, common->name[i-1]);
+	}
+
+	return ret;
+}
+EXPORT_SYMBOL(fsg_sysfs_update);
 
 /*-------------------------------------------------------------------------*/
 
@@ -3404,7 +3926,6 @@ static void fsg_lun_drop(struct config_group *group, struct config_item *item)
 		struct config_item *gadget;
 
 		gadget = group->cg_item.ci_parent->ci_parent;
-		unregister_gadget_item(gadget);
 	}
 
 	fsg_common_remove_lun(lun_opts->lun, fsg_opts->common->sysfs);
@@ -3630,6 +4151,8 @@ static struct usb_function *fsg_alloc(struct usb_function_instance *fi)
 	fsg->function.free_func	= fsg_free;
 
 	fsg->common               = common;
+	setup_timer(&common->vfs_timer, msc_usb_vfs_timer_func,
+		(unsigned long) common);
 
 	return &fsg->function;
 }

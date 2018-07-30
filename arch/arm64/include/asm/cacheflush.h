@@ -3,6 +3,7 @@
  *
  * Copyright (C) 1999-2002 Russell King.
  * Copyright (C) 2012 ARM Ltd.
+ * Copyright (c) 2014-2015, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -65,6 +66,8 @@
  *		- kaddr  - page address
  *		- size   - region size
  */
+extern void flush_cache_all(void);
+extern void flush_cache_louis(void);
 extern void flush_cache_range(struct vm_area_struct *vma, unsigned long start, unsigned long end);
 extern void flush_icache_range(unsigned long start, unsigned long end);
 extern void __flush_dcache_area(void *addr, size_t len);
@@ -85,6 +88,12 @@ static inline void flush_cache_page(struct vm_area_struct *vma,
 extern void __dma_map_area(const void *, size_t, int);
 extern void __dma_unmap_area(const void *, size_t, int);
 extern void __dma_flush_range(const void *, const void *);
+extern void __dma_inv_range(const void *, const void *);
+extern void __dma_clean_range(const void *, const void *);
+
+#define dmac_flush_range __dma_flush_range
+#define dmac_inv_range __dma_inv_range
+#define dmac_clean_range __dma_clean_range
 
 /*
  * Copy user data from/to a page which is mapped into a different
@@ -155,4 +164,21 @@ int set_memory_rw(unsigned long addr, int numpages);
 int set_memory_x(unsigned long addr, int numpages);
 int set_memory_nx(unsigned long addr, int numpages);
 
+#ifdef CONFIG_DEBUG_RODATA
+void mark_rodata_ro(void);
+#endif
+
+#ifdef CONFIG_KERNEL_TEXT_RDONLY
+void set_kernel_text_ro(void);
+#else
+static inline void set_kernel_text_ro(void) { }
+#endif
+
+#ifdef CONFIG_FREE_PAGES_RDONLY
+#define mark_addr_rdonly(a)	set_memory_ro((unsigned long)a, 1);
+#define mark_addr_rdwrite(a)	set_memory_rw((unsigned long)a, 1);
+#else
+#define mark_addr_rdonly(a)
+#define mark_addr_rdwrite(a)
+#endif
 #endif

@@ -843,7 +843,7 @@ static void netlink_unbind(int group, long unsigned int groups,
 
 	for (undo = 0; undo < group; undo++)
 		if (test_bit(undo, &groups))
-			nlk->netlink_unbind(undo);
+			nlk->netlink_unbind(undo + 1);
 }
 
 static int netlink_bind(struct socket *sock, struct sockaddr *addr,
@@ -881,7 +881,7 @@ static int netlink_bind(struct socket *sock, struct sockaddr *addr,
 		for (group = 0; group < nlk->ngroups; group++) {
 			if (!test_bit(group, &groups))
 				continue;
-			err = nlk->netlink_bind(group);
+			err = nlk->netlink_bind(group + 1);
 			if (!err)
 				continue;
 			netlink_unbind(group, groups, nlk);
@@ -2073,7 +2073,7 @@ EXPORT_SYMBOL(__netlink_dump_start);
 
 void netlink_ack(struct sk_buff *in_skb, struct nlmsghdr *nlh, int err)
 {
-	struct sk_buff *skb;
+	struct sk_buff *skb = NULL;
 	struct nlmsghdr *rep;
 	struct nlmsgerr *errmsg;
 	size_t payload = sizeof(*errmsg);
@@ -2095,6 +2095,7 @@ void netlink_ack(struct sk_buff *in_skb, struct nlmsghdr *nlh, int err)
 			sk->sk_error_report(sk);
 			sock_put(sk);
 		}
+		pr_err("%s no buff %d %d\n",__FUNCTION__,nlmsg_total_size(payload),err);
 		return;
 	}
 
@@ -2112,6 +2113,7 @@ int netlink_rcv_skb(struct sk_buff *skb, int (*cb)(struct sk_buff *,
 {
 	struct nlmsghdr *nlh;
 	int err;
+	int logctrl=0;
 
 	while (skb->len >= nlmsg_total_size(0)) {
 		int msglen;
@@ -2119,8 +2121,10 @@ int netlink_rcv_skb(struct sk_buff *skb, int (*cb)(struct sk_buff *,
 		nlh = nlmsg_hdr(skb);
 		err = 0;
 
-		if (nlh->nlmsg_len < NLMSG_HDRLEN || skb->len < nlh->nlmsg_len)
+		if (nlh->nlmsg_len < NLMSG_HDRLEN || skb->len < nlh->nlmsg_len){
+			pr_err("%s %d %d len small\n",__FUNCTION__,skb->len,nlh->nlmsg_len);
 			return 0;
+		}
 
 		/* Only requests are handled by the kernel */
 		if (!(nlh->nlmsg_flags & NLM_F_REQUEST))
@@ -2131,8 +2135,9 @@ int netlink_rcv_skb(struct sk_buff *skb, int (*cb)(struct sk_buff *,
 			goto ack;
 
 		err = cb(skb, nlh);
-		if (err == -EINTR)
+		if (err == -EINTR){
 			goto skip;
+		}
 
 ack:
 		if (nlh->nlmsg_flags & NLM_F_ACK || err)

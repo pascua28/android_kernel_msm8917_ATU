@@ -37,6 +37,7 @@
 #include <asm/mach/map.h>
 #include <asm/mach/pci.h>
 #include <asm/fixmap.h>
+#include <asm/early_ioremap.h>
 
 #include "mm.h"
 #include "tcm.h"
@@ -374,11 +375,13 @@ int set_memory_##_name(unsigned long addr, int numpages) \
 	unsigned long size = PAGE_SIZE*numpages; \
 	unsigned end = start + size; \
 \
-	if (start < MODULES_VADDR || start >= MODULES_END) \
-		return -EINVAL;\
+	if (!IS_ENABLED(CONFIG_FORCE_PAGES)) { \
+		if (start < MODULES_VADDR || start >= MODULES_END) \
+			return -EINVAL;\
 \
-	if (end < MODULES_VADDR || end >= MODULES_END) \
-		return -EINVAL; \
+		if (end < MODULES_VADDR || end >= MODULES_END) \
+			return -EINVAL; \
+	} \
 \
 	apply_to_page_range(&init_mm, start, size, callback, NULL); \
 	flush_tlb_kernel_range(start, end); \
@@ -892,7 +895,7 @@ static void __init create_36bit_mapping(struct map_desc *md,
  * offsets, and we take full advantage of sections and
  * supersections.
  */
-static void __init create_mapping(struct map_desc *md)
+void __init create_mapping(struct map_desc *md)
 {
 	unsigned long addr, length, end;
 	phys_addr_t phys;
@@ -907,7 +910,7 @@ static void __init create_mapping(struct map_desc *md)
 	}
 
 	if ((md->type == MT_DEVICE || md->type == MT_ROM) &&
-	    md->virtual >= PAGE_OFFSET &&
+	    md->virtual >= PAGE_OFFSET && md->virtual < 0xffc00000 &&
 	    (md->virtual < VMALLOC_START || md->virtual >= VMALLOC_END)) {
 		printk(KERN_WARNING "BUG: mapping for 0x%08llx"
 		       " at 0x%08lx out of vmalloc space\n",
@@ -1129,6 +1132,19 @@ void __init sanity_check_meminfo(void)
 	phys_addr_t vmalloc_limit = __pa(vmalloc_min - 1) + 1;
 	struct memblock_region *reg;
 
+#ifdef CONFIG_ENABLE_VMALLOC_SAVING
+	struct memblock_region *prev_reg = NULL;
+
+	for_each_memblock(memory, reg) {
+		if (prev_reg == NULL) {
+			prev_reg = reg;
+			continue;
+		}
+		vmalloc_limit += reg->base - (prev_reg->base + prev_reg->size);
+		prev_reg = reg;
+	}
+#endif
+
 	for_each_memblock(memory, reg) {
 		phys_addr_t block_start = reg->base;
 		phys_addr_t block_end = reg->base + reg->size;
@@ -1287,7 +1303,7 @@ static void __init devicemaps_init(const struct machine_desc *mdesc)
 
 	early_trap_init(vectors);
 
-	for (addr = VMALLOC_START; addr; addr += PMD_SIZE)
+	for (addr = VMALLOC_START; addr < FIXADDR_START; addr += PMD_SIZE)
 		pmd_clear(pmd_off_k(addr));
 
 	/*
@@ -1387,12 +1403,21 @@ static void __init map_lowmem(void)
 	struct memblock_region *reg;
 	unsigned long kernel_x_start = round_down(__pa(_stext), SECTION_SIZE);
 	unsigned long kernel_x_end = round_up(__pa(__init_end), SECTION_SIZE);
+	struct static_vm *svm;
+	phys_addr_t start;
+	phys_addr_t end;
+	unsigned long vaddr;
+	unsigned long pfn;
+	unsigned long length;
+	unsigned int type;
+	int nr = 0;
 
 	/* Map all the lowmem memory banks. */
 	for_each_memblock(memory, reg) {
-		phys_addr_t start = reg->base;
-		phys_addr_t end = start + reg->size;
 		struct map_desc map;
+		start = reg->base;
+		end = start + reg->size;
+		nr++;
 
 		if (end > arm_lowmem_limit)
 			end = arm_lowmem_limit;
@@ -1440,6 +1465,34 @@ static void __init map_lowmem(void)
 				create_mapping(&map);
 			}
 		}
+	}
+	svm = early_alloc_aligned(sizeof(*svm) * nr, __alignof__(*svm));
+
+	for_each_memblock(memory, reg) {
+		struct vm_struct *vm;
+
+		start = reg->base;
+		end = start + reg->size;
+
+		if (end > arm_lowmem_limit)
+			end = arm_lowmem_limit;
+		if (start >= end)
+			break;
+
+		vm = &svm->vm;
+		pfn = __phys_to_pfn(start);
+		vaddr = __phys_to_virt(start);
+		length = end - start;
+		type = MT_MEMORY_RW;
+
+		vm->addr = (void *)(vaddr & PAGE_MASK);
+		vm->size = PAGE_ALIGN(length + (vaddr & ~PAGE_MASK));
+		vm->phys_addr = __pfn_to_phys(pfn);
+		vm->flags = VM_LOWMEM;
+		vm->flags |= VM_ARM_MTYPE(type);
+		vm->caller = map_lowmem;
+		add_static_vm_early(svm++);
+		mark_vmalloc_reserved_area(vm->addr, vm->size);
 	}
 }
 
@@ -1538,6 +1591,119 @@ void __init early_paging_init(const struct machine_desc *mdesc,
 
 #endif
 
+#ifdef CONFIG_FORCE_PAGES
+/*
+ * remap a PMD into pages
+ * We split a single pmd here none of this two pmd nonsense
+ */
+static noinline void __init split_pmd(pmd_t *pmd, unsigned long addr,
+				unsigned long end, unsigned long pfn,
+				const struct mem_type *type)
+{
+	pte_t *pte, *start_pte;
+	pmd_t *base_pmd;
+
+	base_pmd = pmd_offset(
+			pud_offset(pgd_offset(&init_mm, addr), addr), addr);
+
+	if (pmd_none(*base_pmd) || pmd_bad(*base_pmd)) {
+		start_pte = early_alloc(PTE_HWTABLE_OFF + PTE_HWTABLE_SIZE);
+#ifndef CONFIG_ARM_LPAE
+		/*
+		 * Following is needed when new pte is allocated for pmd[1]
+		 * cases, which may happen when base (start) address falls
+		 * under pmd[1].
+		 */
+		if (addr & SECTION_SIZE)
+			start_pte += pte_index(addr);
+#endif
+	} else {
+		start_pte = pte_offset_kernel(base_pmd, addr);
+	}
+
+	pte = start_pte;
+
+	do {
+		set_pte_ext(pte, pfn_pte(pfn, type->prot_pte), 0);
+		pfn++;
+	} while (pte++, addr += PAGE_SIZE, addr != end);
+
+	*pmd = __pmd((__pa(start_pte) + PTE_HWTABLE_OFF) | type->prot_l1);
+	mb(); /* let pmd be programmed */
+	flush_pmd_entry(pmd);
+	flush_tlb_all();
+}
+
+/*
+ * It's significantly easier to remap as pages later after all memory is
+ * mapped. Everything is sections so all we have to do is split
+ */
+static void __init remap_pages(void)
+{
+	struct memblock_region *reg;
+
+	for_each_memblock(memory, reg) {
+		phys_addr_t phys_start = reg->base;
+		phys_addr_t phys_end = reg->base + reg->size;
+		unsigned long addr = (unsigned long)__va(phys_start);
+		unsigned long end = (unsigned long)__va(phys_end);
+		pmd_t *pmd = NULL;
+		unsigned long next;
+		unsigned long pfn = __phys_to_pfn(phys_start);
+		bool fixup = false;
+		unsigned long saved_start = addr;
+
+		if (phys_start > arm_lowmem_limit)
+			break;
+		if (phys_end > arm_lowmem_limit)
+			end = (unsigned long)__va(arm_lowmem_limit);
+		if (phys_start >= phys_end)
+			break;
+
+		pmd = pmd_offset(
+			pud_offset(pgd_offset(&init_mm, addr), addr), addr);
+
+#ifndef	CONFIG_ARM_LPAE
+		if (addr & SECTION_SIZE) {
+			fixup = true;
+			pmd_empty_section_gap((addr - SECTION_SIZE) & PMD_MASK);
+			pmd++;
+		}
+
+		if (end & SECTION_SIZE)
+			pmd_empty_section_gap(end);
+#endif
+
+		do {
+			next = addr + SECTION_SIZE;
+
+			if (pmd_none(*pmd) || pmd_bad(*pmd))
+				split_pmd(pmd, addr, next, pfn,
+						&mem_types[MT_MEMORY_RWX]);
+			pmd++;
+			pfn += SECTION_SIZE >> PAGE_SHIFT;
+
+		} while (addr = next, addr < end);
+
+		if (fixup) {
+			/*
+			 * Put a faulting page table here to avoid detecting no
+			 * pmd when accessing an odd section boundary. This
+			 * needs to be faulting to help catch errors and avoid
+			 * speculation
+			 */
+			pmd = pmd_off_k(saved_start);
+			pmd[0] = pmd[1] & ~1;
+		}
+	}
+}
+#else
+static void __init remap_pages(void)
+{
+
+}
+#endif
+
 /*
  * paging_init() sets up the page tables, initialises the zone memory
  * maps, and sets up the zero page, bad page and bad page tables.
@@ -1550,6 +1716,8 @@ void __init paging_init(const struct machine_desc *mdesc)
 	prepare_page_table();
 	map_lowmem();
 	dma_contiguous_remap();
+	remap_pages();
+	early_ioremap_reset();
 	devicemaps_init(mdesc);
 	kmap_init();
 	tcm_init();

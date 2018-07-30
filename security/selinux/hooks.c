@@ -84,6 +84,7 @@
 #include <linux/export.h>
 #include <linux/msg.h>
 #include <linux/shm.h>
+#include <linux/pfk.h>
 
 #include "avc.h"
 #include "objsec.h"
@@ -1203,8 +1204,6 @@ static inline u16 socket_type_to_security_class(int family, int type, int protoc
 		switch (protocol) {
 		case NETLINK_ROUTE:
 			return SECCLASS_NETLINK_ROUTE_SOCKET;
-		case NETLINK_FIREWALL:
-			return SECCLASS_NETLINK_FIREWALL_SOCKET;
 		case NETLINK_SOCK_DIAG:
 			return SECCLASS_NETLINK_TCPDIAG_SOCKET;
 		case NETLINK_NFLOG:
@@ -1213,14 +1212,28 @@ static inline u16 socket_type_to_security_class(int family, int type, int protoc
 			return SECCLASS_NETLINK_XFRM_SOCKET;
 		case NETLINK_SELINUX:
 			return SECCLASS_NETLINK_SELINUX_SOCKET;
+		case NETLINK_ISCSI:
+			return SECCLASS_NETLINK_ISCSI_SOCKET;
 		case NETLINK_AUDIT:
 			return SECCLASS_NETLINK_AUDIT_SOCKET;
-		case NETLINK_IP6_FW:
-			return SECCLASS_NETLINK_IP6FW_SOCKET;
+		case NETLINK_FIB_LOOKUP:
+			return SECCLASS_NETLINK_FIB_LOOKUP_SOCKET;
+		case NETLINK_CONNECTOR:
+			return SECCLASS_NETLINK_CONNECTOR_SOCKET;
+		case NETLINK_NETFILTER:
+			return SECCLASS_NETLINK_NETFILTER_SOCKET;
 		case NETLINK_DNRTMSG:
 			return SECCLASS_NETLINK_DNRT_SOCKET;
 		case NETLINK_KOBJECT_UEVENT:
 			return SECCLASS_NETLINK_KOBJECT_UEVENT_SOCKET;
+		case NETLINK_GENERIC:
+			return SECCLASS_NETLINK_GENERIC_SOCKET;
+		case NETLINK_SCSITRANSPORT:
+			return SECCLASS_NETLINK_SCSITRANSPORT_SOCKET;
+		case NETLINK_RDMA:
+			return SECCLASS_NETLINK_RDMA_SOCKET;
+		case NETLINK_CRYPTO:
+			return SECCLASS_NETLINK_CRYPTO_SOCKET;
 		default:
 			return SECCLASS_NETLINK_SOCKET;
 		}
@@ -1230,6 +1243,8 @@ static inline u16 socket_type_to_security_class(int family, int type, int protoc
 		return SECCLASS_KEY_SOCKET;
 	case PF_APPLETALK:
 		return SECCLASS_APPLETALK_SOCKET;
+	case PF_CAN:
+		return SECCLASS_CAN_SOCKET;
 	}
 
 	return SECCLASS_SOCKET;
@@ -1734,8 +1749,8 @@ static int may_create(struct inode *dir,
 		return rc;
 
 	return avc_has_perm(newsid, sbsec->sid,
-			    SECCLASS_FILESYSTEM,
-			    FILESYSTEM__ASSOCIATE, &ad);
+						SECCLASS_FILESYSTEM,
+						FILESYSTEM__ASSOCIATE, &ad);
 }
 
 /* Check whether a task can create a key. */
@@ -1791,8 +1806,7 @@ static int may_link(struct inode *dir,
 		return 0;
 	}
 
-	rc = avc_has_perm(sid, isec->sid, isec->sclass, av, &ad);
-	return rc;
+	return avc_has_perm(sid, isec->sid, isec->sclass, av, &ad);
 }
 
 static inline int may_rename(struct inode *old_dir,

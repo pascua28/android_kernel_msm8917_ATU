@@ -77,13 +77,9 @@ struct acc_dev {
 	struct usb_ep *ep_in;
 	struct usb_ep *ep_out;
 
-	/* online indicates state of function_set_alt & function_unbind
-	 * set to 1 when we connect
-	 */
+	/* set to 1 when we connect */
 	int online:1;
-
-	/* disconnected indicates state of open & release
-	 * Set to 1 when we disconnect.
+	/* Set to 1 when we disconnect.
 	 * Not cleared until our file is closed.
 	 */
 	int disconnected:1;
@@ -140,6 +136,41 @@ static struct usb_interface_descriptor acc_interface_desc = {
 	.bInterfaceProtocol     = 0,
 };
 
+static struct usb_endpoint_descriptor acc_superspeed_in_desc = {
+	.bLength                = USB_DT_ENDPOINT_SIZE,
+	.bDescriptorType        = USB_DT_ENDPOINT,
+	.bEndpointAddress       = USB_DIR_IN,
+	.bmAttributes           = USB_ENDPOINT_XFER_BULK,
+	.wMaxPacketSize         = __constant_cpu_to_le16(1024),
+};
+
+static struct usb_ss_ep_comp_descriptor acc_superspeed_in_comp_desc = {
+	.bLength =		sizeof acc_superspeed_in_comp_desc,
+	.bDescriptorType =	USB_DT_SS_ENDPOINT_COMP,
+
+	/* the following 2 values can be tweaked if necessary */
+	/* .bMaxBurst =		0, */
+	/* .bmAttributes =	0, */
+};
+
+static struct usb_endpoint_descriptor acc_superspeed_out_desc = {
+	.bLength                = USB_DT_ENDPOINT_SIZE,
+	.bDescriptorType        = USB_DT_ENDPOINT,
+	.bEndpointAddress       = USB_DIR_OUT,
+	.bmAttributes           = USB_ENDPOINT_XFER_BULK,
+	.wMaxPacketSize         = __constant_cpu_to_le16(1024),
+};
+
+static struct usb_ss_ep_comp_descriptor acc_superspeed_out_comp_desc = {
+	.bLength =		sizeof acc_superspeed_out_comp_desc,
+	.bDescriptorType =	USB_DT_SS_ENDPOINT_COMP,
+
+	/* the following 2 values can be tweaked if necessary */
+	/* .bMaxBurst =		0, */
+	/* .bmAttributes =	0, */
+};
+
+
 static struct usb_endpoint_descriptor acc_highspeed_in_desc = {
 	.bLength                = USB_DT_ENDPOINT_SIZE,
 	.bDescriptorType        = USB_DT_ENDPOINT,
@@ -181,6 +212,15 @@ static struct usb_descriptor_header *hs_acc_descs[] = {
 	(struct usb_descriptor_header *) &acc_interface_desc,
 	(struct usb_descriptor_header *) &acc_highspeed_in_desc,
 	(struct usb_descriptor_header *) &acc_highspeed_out_desc,
+	NULL,
+};
+
+static struct usb_descriptor_header *ss_acc_descs[] = {
+	(struct usb_descriptor_header *) &acc_interface_desc,
+	(struct usb_descriptor_header *) &acc_superspeed_in_desc,
+	(struct usb_descriptor_header *) &acc_superspeed_in_comp_desc,
+	(struct usb_descriptor_header *) &acc_superspeed_out_desc,
+	(struct usb_descriptor_header *) &acc_superspeed_out_comp_desc,
 	NULL,
 };
 
@@ -266,6 +306,7 @@ static struct usb_request *req_get(struct acc_dev *dev, struct list_head *head)
 
 static void acc_set_disconnected(struct acc_dev *dev)
 {
+	dev->online = 0;
 	dev->disconnected = 1;
 }
 
@@ -514,7 +555,7 @@ static int create_bulk_endpoints(struct acc_dev *dev,
 	struct usb_ep *ep;
 	int i;
 
-	DBG(cdev, "create_bulk_endpoints dev: %p\n", dev);
+	DBG(cdev, "create_bulk_endpoints dev: %pK\n", dev);
 
 	ep = usb_ep_autoconfig(cdev->gadget, in_desc);
 	if (!ep) {
@@ -534,9 +575,19 @@ static int create_bulk_endpoints(struct acc_dev *dev,
 	ep->driver_data = dev;		/* claim the endpoint */
 	dev->ep_out = ep;
 
+	ep = usb_ep_autoconfig(cdev->gadget, out_desc);
+	if (!ep) {
+		DBG(cdev, "usb_ep_autoconfig for ep_out failed\n");
+		return -ENODEV;
+	}
+	DBG(cdev, "usb_ep_autoconfig for ep_out got %s\n", ep->name);
+	ep->driver_data = dev;		/* claim the endpoint */
+	dev->ep_out = ep;
+
 	/* now allocate requests for our endpoints */
 	for (i = 0; i < TX_REQ_MAX; i++) {
-		req = acc_request_new(dev->ep_in, BULK_BUFFER_SIZE);
+		req = acc_request_new(dev->ep_in,
+			BULK_BUFFER_SIZE + cdev->gadget->extra_buf_alloc);
 		if (!req)
 			goto fail;
 		req->complete = acc_complete_in;
@@ -568,6 +619,7 @@ static ssize_t acc_read(struct file *fp, char __user *buf,
 	struct usb_request *req;
 	ssize_t r = count;
 	unsigned xfer;
+	int len;
 	int ret = 0;
 
 	pr_debug("acc_read(%zu)\n", count);
@@ -588,6 +640,8 @@ static ssize_t acc_read(struct file *fp, char __user *buf,
 		goto done;
 	}
 
+	len = ALIGN(count, dev->ep_out->maxpacket);
+
 	if (dev->rx_done) {
 		// last req cancelled. try to get it.
 		req = dev->rx_req[0];
@@ -597,14 +651,14 @@ static ssize_t acc_read(struct file *fp, char __user *buf,
 requeue_req:
 	/* queue a request */
 	req = dev->rx_req[0];
-	req->length = count;
+	req->length = len;
 	dev->rx_done = 0;
 	ret = usb_ep_queue(dev->ep_out, req, GFP_KERNEL);
 	if (ret < 0) {
 		r = -EIO;
 		goto done;
 	} else {
-		pr_debug("rx %p queue\n", req);
+		pr_debug("rx %pK queue\n", req);
 	}
 
 	/* wait for a request to complete */
@@ -627,7 +681,7 @@ copy_data:
 		if (req->actual == 0)
 			goto requeue_req;
 
-		pr_debug("rx %p %u\n", req, req->actual);
+		pr_debug("rx %pK %u\n", req, req->actual);
 		xfer = (req->actual < count) ? req->actual : count;
 		r = xfer;
 		if (copy_to_user(buf, req->buf, xfer))
@@ -765,10 +819,7 @@ static int acc_release(struct inode *ip, struct file *fp)
 	printk(KERN_INFO "acc_release\n");
 
 	WARN_ON(!atomic_xchg(&_acc_dev->open_excl, 0));
-	/* indicate that we are disconnected
-	 * still could be online so don't touch online flag
-	 */
-	_acc_dev->disconnected = 1;
+	_acc_dev->disconnected = 0;
 	return 0;
 }
 
@@ -778,6 +829,9 @@ static const struct file_operations acc_fops = {
 	.read = acc_read,
 	.write = acc_write,
 	.unlocked_ioctl = acc_ioctl,
+#ifdef CONFIG_COMPAT
+	.compat_ioctl = acc_ioctl,
+#endif
 	.open = acc_open,
 	.release = acc_release,
 };
@@ -893,6 +947,8 @@ int acc_ctrlrequest(struct usb_composite_dev *cdev,
 			memset(dev->serial, 0, sizeof(dev->serial));
 			dev->start_requested = 0;
 			dev->audio_mode = 0;
+			strlcpy(dev->manufacturer, "Android", ACC_STRING_SIZE);
+			strlcpy(dev->model, "Android", ACC_STRING_SIZE);
 		}
 	}
 
@@ -917,24 +973,26 @@ err:
 EXPORT_SYMBOL_GPL(acc_ctrlrequest);
 
 static int
-acc_function_bind_configfs(struct usb_configuration *c, struct usb_function *f)
+__acc_function_bind(struct usb_configuration *c,
+			struct usb_function *f, bool configfs)
 {
 	struct usb_composite_dev *cdev = c->cdev;
 	struct acc_dev	*dev = func_to_dev(f);
 	int			id;
 	int			ret;
 
-	DBG(cdev, "acc_function_bind dev: %p\n", dev);
+	DBG(cdev, "acc_function_bind dev: %pK\n", dev);
 
-	if (acc_string_defs[INTERFACE_STRING_INDEX].id == 0) {
-		ret = usb_string_id(c->cdev);
-		if (ret < 0)
-			return ret;
-		acc_string_defs[INTERFACE_STRING_INDEX].id = ret;
-		acc_interface_desc.iInterface = ret;
+	if (configfs) {
+		if (acc_string_defs[INTERFACE_STRING_INDEX].id == 0) {
+			ret = usb_string_id(c->cdev);
+			if (ret < 0)
+				return ret;
+			acc_string_defs[INTERFACE_STRING_INDEX].id = ret;
+			acc_interface_desc.iInterface = ret;
+		}
+		dev->cdev = c->cdev;
 	}
-	dev->cdev = c->cdev;
-
 	ret = hid_register_driver(&acc_hid_driver);
 	if (ret)
 		return ret;
@@ -961,10 +1019,29 @@ acc_function_bind_configfs(struct usb_configuration *c, struct usb_function *f)
 			acc_fullspeed_out_desc.bEndpointAddress;
 	}
 
+	/* support super speed hardware */
+	if (gadget_is_superspeed(c->cdev->gadget)) {
+		acc_superspeed_in_desc.bEndpointAddress =
+			acc_fullspeed_in_desc.bEndpointAddress;
+		acc_superspeed_out_desc.bEndpointAddress =
+			acc_fullspeed_out_desc.bEndpointAddress;
+	}
+
 	DBG(cdev, "%s speed %s: IN/%s, OUT/%s\n",
 			gadget_is_dualspeed(c->cdev->gadget) ? "dual" : "full",
 			f->name, dev->ep_in->name, dev->ep_out->name);
 	return 0;
+}
+
+static int
+acc_function_bind(struct usb_configuration *c, struct usb_function *f) {
+	return __acc_function_bind(c, f, false);
+}
+
+static int
+acc_function_bind_configfs(struct usb_configuration *c,
+			struct usb_function *f) {
+	return __acc_function_bind(c, f, true);
 }
 
 static void
@@ -1007,10 +1084,6 @@ acc_function_unbind(struct usb_configuration *c, struct usb_function *f)
 	struct acc_dev	*dev = func_to_dev(f);
 	struct usb_request *req;
 	int i;
-
-	dev->online = 0;		/* clear online flag */
-	wake_up(&dev->read_wq);		/* unblock reads on closure */
-	wake_up(&dev->write_wq);	/* likewise for writes */
 
 	while ((req = req_get(dev, &dev->tx_idle)))
 		acc_request_free(req, dev->ep_in);
@@ -1095,7 +1168,7 @@ static void acc_hid_work(struct work_struct *data)
 	list_for_each_safe(entry, temp, &new_list) {
 		hid = list_entry(entry, struct acc_hid_dev, list);
 		if (acc_hid_init(hid)) {
-			pr_err("can't add HID device %p\n", hid);
+			pr_err("can't add HID device %pK\n", hid);
 			acc_hid_delete(hid);
 		} else {
 			spin_lock_irqsave(&dev->lock, flags);
@@ -1124,25 +1197,36 @@ static int acc_function_set_alt(struct usb_function *f,
 	DBG(cdev, "acc_function_set_alt intf: %d alt: %d\n", intf, alt);
 
 	ret = config_ep_by_speed(cdev->gadget, f, dev->ep_in);
-	if (ret)
-		return ret;
-
+	if (ret) {
+		dev->ep_in->desc = NULL;
+		ERROR(cdev, "config_ep_by_speed failes for ep %s, result %d\n",
+				dev->ep_in->name, ret);
+			return ret;
+	}
 	ret = usb_ep_enable(dev->ep_in);
-	if (ret)
+	if (ret) {
+		ERROR(cdev, "failed to enable ep %s, result %d\n",
+			dev->ep_in->name, ret);
 		return ret;
+	}
 
 	ret = config_ep_by_speed(cdev->gadget, f, dev->ep_out);
-	if (ret)
+	if (ret) {
+		dev->ep_out->desc = NULL;
+		ERROR(cdev, "config_ep_by_speed failes for ep %s, result %d\n",
+			dev->ep_out->name, ret);
+		usb_ep_disable(dev->ep_in);
 		return ret;
-
+	}
 	ret = usb_ep_enable(dev->ep_out);
 	if (ret) {
+		ERROR(cdev, "failed to enable ep %s, result %d\n",
+				dev->ep_out->name, ret);
 		usb_ep_disable(dev->ep_in);
 		return ret;
 	}
 
 	dev->online = 1;
-	dev->disconnected = 0; /* if online then not disconnected */
 
 	/* readers may be blocked waiting for us to go online */
 	wake_up(&dev->read_wq);
@@ -1155,8 +1239,7 @@ static void acc_function_disable(struct usb_function *f)
 	struct usb_composite_dev	*cdev = dev->cdev;
 
 	DBG(cdev, "acc_function_disable\n");
-	acc_set_disconnected(dev); /* this now only sets disconnected */
-	dev->online = 0; /* so now need to clear online flag here too */
+	acc_set_disconnected(dev);
 	usb_ep_disable(dev->ep_in);
 	usb_ep_disable(dev->ep_out);
 
@@ -1164,6 +1247,37 @@ static void acc_function_disable(struct usb_function *f)
 	wake_up(&dev->read_wq);
 
 	VDBG(cdev, "%s disabled\n", dev->function.name);
+}
+
+static int acc_bind_config(struct usb_configuration *c)
+{
+	struct acc_dev *dev = _acc_dev;
+	int ret;
+
+	printk(KERN_INFO "acc_bind_config\n");
+
+	/* allocate a string ID for our interface */
+	if (acc_string_defs[INTERFACE_STRING_INDEX].id == 0) {
+		ret = usb_string_id(c->cdev);
+		if (ret < 0)
+			return ret;
+		acc_string_defs[INTERFACE_STRING_INDEX].id = ret;
+		acc_interface_desc.iInterface = ret;
+	}
+
+	dev->cdev = c->cdev;
+	dev->function.name = "accessory";
+	dev->function.strings = acc_strings,
+	dev->function.fs_descriptors = fs_acc_descs;
+	dev->function.hs_descriptors = hs_acc_descs;
+	if (gadget_is_superspeed(c->cdev->gadget))
+		dev->function.ss_descriptors = ss_acc_descs;
+	dev->function.bind = acc_function_bind;
+	dev->function.unbind = acc_function_unbind;
+	dev->function.set_alt = acc_function_set_alt;
+	dev->function.disable = acc_function_disable;
+
+	return usb_add_function(c, &dev->function);
 }
 
 static int acc_setup(void)
@@ -1186,12 +1300,12 @@ static int acc_setup(void)
 	INIT_DELAYED_WORK(&dev->start_work, acc_start_work);
 	INIT_WORK(&dev->hid_work, acc_hid_work);
 
-	/* _acc_dev must be set before calling usb_gadget_register_driver */
-	_acc_dev = dev;
-
 	ret = misc_register(&acc_device);
 	if (ret)
 		goto err;
+
+	/* _acc_dev must be set before calling usb_gadget_register_driver */
+	_acc_dev = dev;
 
 	return 0;
 

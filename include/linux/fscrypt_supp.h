@@ -16,6 +16,9 @@ extern void fscrypt_release_ctx(struct fscrypt_ctx *);
 extern struct page *fscrypt_encrypt_page(const struct inode *, struct page *,
 						unsigned int, unsigned int,
 						u64, gfp_t);
+extern struct page *fscrypt_encrypt_dio_page(const struct inode *, struct page *,
+					     unsigned int, unsigned int,
+					     u64, gfp_t);
 extern int fscrypt_decrypt_page(const struct inode *, struct page *, unsigned int,
 				unsigned int, u64);
 extern void fscrypt_restore_control_page(struct page *);
@@ -141,7 +144,11 @@ static inline bool fscrypt_match_name(const struct fscrypt_name *fname,
 }
 
 /* bio.c */
+extern int fscrypt_decrypt_dio_page(struct inode *inode, struct page *page,
+			unsigned int len, unsigned int offs, u64 lblk_num);
 extern void fscrypt_decrypt_bio_pages(struct fscrypt_ctx *, struct bio *);
+extern void fscrypt_decrypt_dio_bio_pages(struct fscrypt_ctx *, struct bio *,
+					  work_func_t func);
 extern void fscrypt_pullback_bio_page(struct page **, bool);
 extern int fscrypt_zeroout_range(const struct inode *, pgoff_t, sector_t,
 				 unsigned int);

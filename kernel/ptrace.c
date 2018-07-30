@@ -27,6 +27,10 @@
 #include <linux/cn_proc.h>
 #include <linux/compat.h>
 
+#ifdef CONFIG_HUAWEI_PTRACE_POKE_ON
+#else
+#include <chipset_common/kernel_harden/hw_ptrace_log.h>
+#endif
 
 /*
  * ptrace a task: make the debugger its new parent and
@@ -859,8 +863,11 @@ int ptrace_request(struct task_struct *child, long request,
 		return generic_ptrace_peekdata(child, addr, data);
 	case PTRACE_POKETEXT:
 	case PTRACE_POKEDATA:
+#ifdef CONFIG_HUAWEI_PTRACE_POKE_ON
 		return generic_ptrace_pokedata(child, addr, data);
-
+#else
+		return record_ptrace_info_before_return_EIO(request,child);
+#endif
 #ifdef PTRACE_OLDSETOPTIONS
 	case PTRACE_OLDSETOPTIONS:
 #endif
@@ -1165,9 +1172,14 @@ int compat_ptrace_request(struct task_struct *child, compat_long_t request,
 
 	case PTRACE_POKETEXT:
 	case PTRACE_POKEDATA:
+#ifdef CONFIG_HUAWEI_PTRACE_POKE_ON
 		ret = access_process_vm(child, addr, &data, sizeof(data), 1);
 		ret = (ret != sizeof(data) ? -EIO : 0);
 		break;
+#else
+		ret = record_ptrace_info_before_return_EIO(request,child);
+		break;
+#endif
 
 	case PTRACE_GETEVENTMSG:
 		ret = put_user((compat_ulong_t) child->ptrace_message, datap);

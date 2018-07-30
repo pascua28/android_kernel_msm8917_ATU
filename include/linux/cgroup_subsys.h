@@ -7,6 +7,10 @@
 SUBSYS(cpuset)
 #endif
 
+#if IS_ENABLED(CONFIG_HW_CGROUP_PIDS)
+SUBSYS(pids)
+#endif
+
 #if IS_ENABLED(CONFIG_CGROUP_SCHED)
 SUBSYS(cpu)
 #endif
@@ -49,6 +53,10 @@ SUBSYS(net_prio)
 
 #if IS_ENABLED(CONFIG_CGROUP_HUGETLB)
 SUBSYS(hugetlb)
+#endif
+
+#if IS_ENABLED(CONFIG_CGROUP_IOLIMIT)
+SUBSYS(iolimit)
 #endif
 
 /*

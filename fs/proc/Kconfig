@@ -43,6 +43,14 @@ config PROC_VMCORE
         help
         Exports the dump image of crashed kernel in ELF format.
 
+config TASK_PROTECT_LRU
+	bool "protect lru of a process"
+	depends on !TRANSPARENT_HUGEPAGE && !HUGETLB_PAGE && !MEMCG && (ARM64 || X86_64)
+	default n
+	help
+	  Protect lru of task support. It's between normal lru and mlock,
+	  that means we will reclaim protect lru pages as late as possible.
+
 config PROC_SYSCTL
 	bool "Sysctl support (/proc/sys)" if EXPERT
 	depends on PROC_FS
@@ -71,3 +79,17 @@ config PROC_PAGE_MONITOR
 	  /proc/pid/smaps, /proc/pid/clear_refs, /proc/pid/pagemap,
 	  /proc/kpagecount, and /proc/kpageflags. Disabling these
           interfaces will reduce the size of the kernel by approximately 4kb.
+
+config APP_INFO
+	bool "/proc/app_info support"
+	default y
+	depends on PROC_FS
+	help
+	  export huawei device infomation by /proc/app_info
+
+config HUAWEI_PROC_MEMORYINFO_FAST
+	bool "/proc/meminfo_lite support"
+	depends on PROC_FS
+	default n
+	help
+	  offer a fast way to get system memory info(free and aviliable)

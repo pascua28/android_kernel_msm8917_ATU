@@ -92,6 +92,14 @@ static void del_fsync_inode(struct fsync_inode_entry *entry)
 	kmem_cache_free(fsync_entry_slab, entry);
 }
 
+static void destroy_fsync_dnodes(struct list_head *head)
+{
+	struct fsync_inode_entry *entry, *tmp;
+
+	list_for_each_entry_safe(entry, tmp, head, list)
+		del_fsync_inode(entry);
+}
+
 static int recover_dentry(struct inode *inode, struct page *ipage,
 						struct list_head *dir_list)
 {
@@ -217,6 +225,17 @@ static int find_fsync_dnodes(struct f2fs_sb_info *sbi, struct list_head *head,
 			return 0;
 
 		page = get_tmp_page(sbi, blkaddr);
+		if (PageChecked(page)) {
+			f2fs_msg(sbi->sb, KERN_ERR, "Abandon looped node block list");
+			destroy_fsync_dnodes(head);
+			break;
+		}
+
+		/*
+		 * it's not needed to clear PG_checked flag in temp page since we
+		 * will truncate all those pages in the end of recovery
+		 */
+		SetPageChecked(page);
 
 		if (!is_recoverable_dnode(page))
 			break;
@@ -262,14 +281,6 @@ next:
 	return err;
 }
 
-static void destroy_fsync_dnodes(struct list_head *head)
-{
-	struct fsync_inode_entry *entry, *tmp;
-
-	list_for_each_entry_safe(entry, tmp, head, list)
-		del_fsync_inode(entry);
-}
-
 static int check_index_in_prev_nodes(struct f2fs_sb_info *sbi,
 			block_t blkaddr, struct dnode_of_data *dn)
 {
@@ -291,7 +302,7 @@ static int check_index_in_prev_nodes(struct f2fs_sb_info *sbi,
 		return 0;
 
 	/* Get the previous summary */
-	for (i = CURSEG_WARM_DATA; i <= CURSEG_COLD_DATA; i++) {
+	for (i = CURSEG_HOT_DATA; i <= CURSEG_COLD_DATA; i++) {
 		struct curseg_info *curseg = CURSEG_I(sbi, i);
 		if (curseg->segno == segno) {
 			sum = curseg->sum_blk->entries[blkoff];

@@ -1406,7 +1406,7 @@ static void hci_cs_create_conn(struct hci_dev *hdev, __u8 status)
 
 	conn = hci_conn_hash_lookup_ba(hdev, ACL_LINK, &cp->bdaddr);
 
-	BT_DBG("%s bdaddr %pMR hcon %p", hdev->name, &cp->bdaddr, conn);
+	BT_DBG("%s bdaddr %pMR hcon %pK", hdev->name, &cp->bdaddr, conn);
 
 	if (status) {
 		if (conn && conn->state == BT_CONNECT) {
@@ -2088,6 +2088,9 @@ static void hci_conn_complete_evt(struct hci_dev *hdev, struct sk_buff *skb)
 			hci_send_cmd(hdev, HCI_OP_CHANGE_CONN_PTYPE, sizeof(cp),
 				     &cp);
 		}
+
+		/* Change the ACL LINK POLICY to disable role switch */
+		hci_cfg_link_policy(conn);
 	} else {
 		conn->state = BT_CLOSED;
 		if (conn->type == ACL_LINK)
@@ -3013,7 +3016,7 @@ static void hci_num_comp_pkts_evt(struct hci_dev *hdev, struct sk_buff *skb)
 			break;
 
 		default:
-			BT_ERR("Unknown type %d conn %p", conn->type, conn);
+			BT_ERR("Unknown type %d conn %pK", conn->type, conn);
 			break;
 		}
 	}
@@ -3084,7 +3087,7 @@ static void hci_num_comp_blocks_evt(struct hci_dev *hdev, struct sk_buff *skb)
 			break;
 
 		default:
-			BT_ERR("Unknown type %d conn %p", conn->type, conn);
+			BT_ERR("Unknown type %d conn %pK", conn->type, conn);
 			break;
 		}
 	}
@@ -3486,6 +3489,9 @@ static void hci_sync_conn_complete_evt(struct hci_dev *hdev,
 		conn->state  = BT_CONNECTED;
 
 		hci_conn_add_sysfs(conn);
+		BT_DBG("SCO conn complete");
+		if (hdev->notify)
+			hdev->notify(hdev, HCI_NOTIFY_SCO_COMPLETE);
 		break;
 
 	case 0x10:	/* Connection Accept Timeout */
@@ -4001,6 +4007,7 @@ static void hci_phy_link_complete_evt(struct hci_dev *hdev,
 {
 	struct hci_ev_phy_link_complete *ev = (void *) skb->data;
 	struct hci_conn *hcon, *bredr_hcon;
+	struct amp_mgr *mgr;
 
 	BT_DBG("%s handle 0x%2.2x status 0x%2.2x", hdev->name, ev->phy_handle,
 	       ev->status);
@@ -4019,6 +4026,14 @@ static void hci_phy_link_complete_evt(struct hci_dev *hdev,
 		return;
 	}
 
+	BT_DBG("hcon %pK mgr %pK", hcon, hcon->amp_mgr);
+
+	mgr = hcon->amp_mgr;
+	if (!(mgr && mgr->l2cap_conn && mgr->l2cap_conn->hcon)) {
+		hci_dev_unlock(hdev);
+		BT_DBG("Amp Manager is not Initialized");
+		return;
+	}
 	bredr_hcon = hcon->amp_mgr->l2cap_conn->hcon;
 
 	hcon->state = BT_CONNECTED;
@@ -4057,7 +4072,7 @@ static void hci_loglink_complete_evt(struct hci_dev *hdev, struct sk_buff *skb)
 
 	hchan->handle = le16_to_cpu(ev->handle);
 
-	BT_DBG("hcon %p mgr %p hchan %p", hcon, hcon->amp_mgr, hchan);
+	BT_DBG("hcon %pK mgr %pK hchan %pK", hcon, hcon->amp_mgr, hchan);
 
 	mgr = hcon->amp_mgr;
 	if (mgr && mgr->bredr_chan) {

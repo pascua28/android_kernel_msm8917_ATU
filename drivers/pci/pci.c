@@ -126,15 +126,16 @@ EXPORT_SYMBOL_GPL(pci_bus_max_busnr);
 #ifdef CONFIG_HAS_IOMEM
 void __iomem *pci_ioremap_bar(struct pci_dev *pdev, int bar)
 {
+	struct resource *res = &pdev->resource[bar];
+
 	/*
 	 * Make sure the BAR is actually a memory resource, not an IO resource
 	 */
-	if (!(pci_resource_flags(pdev, bar) & IORESOURCE_MEM)) {
-		WARN_ON(1);
+	if (res->flags & IORESOURCE_UNSET || !(res->flags & IORESOURCE_MEM)) {
+		dev_warn(&pdev->dev, "can't ioremap BAR %d: %pR\n", bar, res);
 		return NULL;
 	}
-	return ioremap_nocache(pci_resource_start(pdev, bar),
-				     pci_resource_len(pdev, bar));
+	return ioremap_nocache(res->start, resource_size(res));
 }
 EXPORT_SYMBOL_GPL(pci_ioremap_bar);
 #endif
@@ -1062,7 +1063,7 @@ static void pci_restore_config_space(struct pci_dev *pdev)
 	if (pdev->hdr_type == PCI_HEADER_TYPE_NORMAL) {
 		pci_restore_config_space_range(pdev, 10, 15, 0);
 		/* Restore BARs before the command register. */
-		pci_restore_config_space_range(pdev, 4, 9, 10);
+		pci_restore_config_space_range(pdev, 4, 9, 0);
 		pci_restore_config_space_range(pdev, 0, 3, 0);
 	} else {
 		pci_restore_config_space_range(pdev, 0, 15, 0);

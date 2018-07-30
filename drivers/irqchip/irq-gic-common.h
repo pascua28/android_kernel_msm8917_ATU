@@ -20,7 +20,11 @@
 #include <linux/of.h>
 #include <linux/irqdomain.h>
 
-void gic_configure_irq(unsigned int irq, unsigned int type,
+extern bool from_suspend;
+extern struct irq_chip gic_arch_extn;
+extern int msm_show_resume_irq_mask;
+
+int gic_configure_irq(unsigned int irq, unsigned int type,
                        void __iomem *base, void (*sync_access)(void));
 void gic_dist_config(void __iomem *base, int gic_irqs,
 		     void (*sync_access)(void));

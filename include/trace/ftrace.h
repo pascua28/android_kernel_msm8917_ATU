@@ -263,6 +263,14 @@
 #undef __print_hex
 #define __print_hex(buf, buf_len) ftrace_print_hex_seq(p, buf, buf_len)
 
+#undef __print_array
+#define __print_array(array, count, el_size)				\
+	({								\
+		BUILD_BUG_ON(el_size != 1 && el_size != 2 &&		\
+			     el_size != 4 && el_size != 8);		\
+		ftrace_print_array_seq(p, array, count, el_size);	\
+	})
+
 #undef DECLARE_EVENT_CLASS
 #define DECLARE_EVENT_CLASS(call, proto, args, tstruct, assign, print)	\
 static notrace enum print_line_t					\
@@ -646,7 +654,8 @@ ftrace_raw_event_##call(void *__data, proto)				\
 									\
 	{ assign; }							\
 									\
-	ftrace_event_buffer_commit(&fbuffer);				\
+	ftrace_event_buffer_commit(&fbuffer,				\
+				   sizeof(*entry) + __data_size);	\
 }
 /*
  * The ftrace_test_probe is compiled out, it is only here as a build time check
@@ -676,6 +685,7 @@ static inline void ftrace_test_probe_##call(void)			\
 #undef __get_dynamic_array_len
 #undef __get_str
 #undef __get_bitmask
+#undef __print_array
 
 #undef TP_printk
 #define TP_printk(fmt, args...) "\"" fmt "\", "  __stringify(args)

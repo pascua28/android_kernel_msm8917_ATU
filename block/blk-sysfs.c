@@ -285,6 +285,13 @@ queue_rq_affinity_store(struct request_queue *q, const char *page, size_t count)
 	return ret;
 }
 
+static ssize_t queue_avg_perf_show(struct request_queue *q, char *page)
+{
+	return sprintf(page, "%llu %llu\n",
+		       (unsigned long long)q->disk_bw * 512,
+		       (unsigned long long)q->disk_iops);
+}
+
 static struct queue_sysfs_entry queue_requests_entry = {
 	.attr = {.name = "nr_requests", .mode = S_IRUGO | S_IWUSR },
 	.show = queue_requests_show,
@@ -404,6 +411,13 @@ static struct queue_sysfs_entry queue_random_entry = {
 	.store = queue_store_random,
 };
 
+/*lint -save -e785*/
+static struct queue_sysfs_entry queue_avg_perf_entry = {
+	.attr = {.name = "average_perf", .mode = S_IRUGO },
+	.show = queue_avg_perf_show,
+};
+/*lint restore*/
+
 static struct attribute *default_attrs[] = {
 	&queue_requests_entry.attr,
 	&queue_ra_entry.attr,
@@ -427,6 +441,7 @@ static struct attribute *default_attrs[] = {
 	&queue_rq_affinity_entry.attr,
 	&queue_iostats_entry.attr,
 	&queue_random_entry.attr,
+	&queue_avg_perf_entry.attr,
 	NULL,
 };
 

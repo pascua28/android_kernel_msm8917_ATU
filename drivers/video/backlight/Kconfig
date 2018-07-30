@@ -1,6 +1,16 @@
 #
 # Backlight & LCD drivers configuration
 #
+config BACKLIGHT_LP8556
+        tristate "POWER support for LP8556"
+        depends on I2C
+       help
+       This option enables support for the panel connected.
+config BACKLIGHT_LM36923
+        tristate "POWER support for LM36923"
+        depends on I2C
+       help
+       This option enables support for the panel connected.
 
 menuconfig BACKLIGHT_LCD_SUPPORT
 	bool "Backlight & LCD device support"

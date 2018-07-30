@@ -42,6 +42,17 @@ config THERMAL_OF
 	  Say 'Y' here if you need to build thermal infrastructure
 	  based on device tree.
 
+config THERMAL_WRITABLE_TRIPS
+	bool "Enable writable trip points"
+	help
+	  This option allows the system integrator to choose whether
+	  trip temperatures can be changed from userspace. The
+	  writable trips need to be specified when setting up the
+	  thermal zone but the choice here takes precedence.
+
+	  Say 'Y' here if you would like to allow userspace tools to
+	  change trip temperatures.
+
 choice
 	prompt "Default Thermal governor"
 	default THERMAL_DEFAULT_GOV_STEP_WISE
@@ -71,6 +82,14 @@ config THERMAL_DEFAULT_GOV_USER_SPACE
 	  Select this if you want to let the user space manage the
 	  platform thermals.
 
+config THERMAL_DEFAULT_GOV_POWER_ALLOCATOR
+	bool "power_allocator"
+	select THERMAL_GOV_POWER_ALLOCATOR
+	help
+	  Select this if you want to control temperature based on
+	  system and device power allocation. This governor can only
+	  operate on cooling devices that implement the power API.
+
 endchoice
 
 config THERMAL_GOV_FAIR_SHARE
@@ -99,6 +118,13 @@ config THERMAL_GOV_USER_SPACE
 	help
 	  Enable this to let the user space manage the platform thermals.
 
+config THERMAL_GOV_POWER_ALLOCATOR
+	bool "Power allocator thermal governor"
+	select THERMAL_POWER_ACTOR
+	help
+	  Enable this to manage platform thermals by dynamically
+	  allocating and limiting power to devices.
+
 config CPU_THERMAL
 	bool "generic cpu cooling support"
 	depends on CPU_FREQ
@@ -109,6 +135,18 @@ config CPU_THERMAL
 	  (drivers/acpi/processor_thermal.c).
 	  This will be useful for platforms using the generic thermal interface
 	  and not the ACPI interface.
+
+	  If you want this support, you should say Y here.
+
+config CLOCK_THERMAL
+	bool "Generic clock cooling support"
+	depends on COMMON_CLK
+	depends on PM_OPP
+	help
+	  This entry implements the generic clock cooling mechanism through
+	  frequency clipping. Typically used to cool off co-processors. The
+	  device that is configured to use this cooling mechanism will be
+	  controlled to reduce clock frequency whenever temperature is high.
 
 	  If you want this support, you should say Y here.
 
@@ -123,6 +161,46 @@ config THERMAL_EMULATION
 	  WARNING: Be careful while enabling this option on production systems,
 	  because userland can easily disable the thermal policy by simply
 	  flooding this sysfs node with low temperature values.
+
+config THERMAL_TSENS8974
+	tristate "Qualcomm 8974 TSENS Temperature driver"
+	depends on THERMAL
+	help
+	  This enables the thermal sysfs driver for the TSENS device. It shows
+	  up in Sysfs as a thermal zone with multiple trip points. Also able
+	  to set threshold temperature for both warm and cool and update
+	  thermal userspace client when a threshold is reached. Warm/Cool
+	  temperature thresholds can be set independently for each sensor.
+
+config LIMITS_MONITOR
+	bool "LMH monitor driver"
+	depends on THERMAL
+	help
+	  Enable this to manage the limits hardware for interrupts, throttling
+	  intensities, and LMH device profiles. This driver also registers the
+	  Limits hardware's monitoring entities as sensors with the thermal
+	  framework.
+
+config LIMITS_LITE_HW
+	bool "LMH Lite hardware driver"
+	depends on LIMITS_MONITOR
+	help
+	 Enable this option for interacting with LMH Lite hardware. This
+	 implements the APIs required for getting the details about sensors
+	 supported by LMH Lite, their throttling intensity and the operating
+	 profiles.
+
+config THERMAL_MONITOR
+	bool "Monitor thermal state and limit CPU Frequency"
+	depends on THERMAL_TSENS8974
+	depends on CPU_FREQ || CPU_FREQ_MSM
+	depends on PM_OPP
+	default n
+	help
+	  This enables thermal monitoring capability in the kernel in the
+	  absence of a system wide thermal monitoring entity or until such an
+	  entity starts running in the userspace. Monitors TSENS temperature
+	  and limits the max frequency of the cores.
 
 config IMX_THERMAL
 	tristate "Temperature sensor driver for Freescale i.MX SoCs"
@@ -184,6 +262,16 @@ config ARMADA_THERMAL
 	help
 	  Enable this option if you want to have support for thermal management
 	  controller present in Armada 370 and Armada XP SoC.
+
+config TEGRA_SOCTHERM
+	tristate "Tegra SOCTHERM thermal management"
+	depends on ARCH_TEGRA
+	help
+	  Enable this option for integrated thermal management support on NVIDIA
+	  Tegra124 systems-on-chip. The driver supports four thermal zones
+	  (CPU, GPU, MEM, PLLX). Cooling devices can be bound to the thermal
+	  zones to manage temperatures. This option is also required for the
+	  emergency thermal reset (thermtrip) feature to function.
 
 config DB8500_CPUFREQ_COOLING
 	tristate "DB8500 cpufreq cooling"
@@ -252,6 +340,33 @@ config INT340X_THERMAL
 config ACPI_THERMAL_REL
 	tristate
 	depends on ACPI
+
+config THERMAL_QPNP
+	tristate "Qualcomm Plug-and-Play PMIC Temperature Alarm"
+	depends on THERMAL
+	depends on OF
+	depends on SPMI || MSM_SPMI
+	depends on OF_SPMI
+	help
+	  This enables a thermal Sysfs driver for Qualcomm plug-and-play (QPNP)
+	  PMIC devices. It shows up in Sysfs as a thermal zone with multiple
+	  trip points. The temperature reported by the thermal zone reflects the
+	  real time die temperature if an ADC is present or an estimate of the
+	  temperature based upon the over temperature stage value if no ADC is
+	  available. If allowed via compile time configuration; enabling the
+	  thermal zone device via the mode file results in shifting PMIC over
+	  temperature shutdown control from hardware to software.
+
+config THERMAL_QPNP_ADC_TM
+	tristate "Qualcomm 8974 Thermal Monitor ADC Driver"
+	depends on THERMAL
+	depends on  SPMI || MSM_SPMI
+	help
+	  This enables the thermal Sysfs driver for the ADC thermal monitoring
+	  device. It shows up in Sysfs as a thermal zone with multiple trip points.
+	  Disabling the thermal zone device via the mode file results in disabling
+	  the sensor. Also able to set threshold temperature for both hot and cold
+	  and update when a threshold is reached.
 
 menu "Texas Instruments thermal drivers"
 source "drivers/thermal/ti-soc-thermal/Kconfig"

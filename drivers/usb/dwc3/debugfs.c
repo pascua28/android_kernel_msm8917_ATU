@@ -16,6 +16,7 @@
  * GNU General Public License for more details.
  */
 
+#include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/slab.h>
 #include <linux/ptrace.h>
@@ -27,6 +28,7 @@
 #include <linux/uaccess.h>
 
 #include <linux/usb/ch9.h>
+#include <linux/ipc_logging.h>
 
 #include "core.h"
 #include "gadget.h"
@@ -38,6 +40,9 @@
 	.name	= __stringify(nm),			\
 	.offset	= DWC3_ ##nm - DWC3_GLOBALS_REGS_START,	\
 }
+
+#define ep_event_rate(ev, c, p, dt)	\
+	((dt) ? ((c.ev - p.ev) * (MSEC_PER_SEC)) / (dt) : 0)
 
 static const struct debugfs_reg32 dwc3_regs[] = {
 	dump_register(GSBUSCFG0),
@@ -210,6 +215,7 @@ static const struct debugfs_reg32 dwc3_regs[] = {
 	dump_register(GEVNTCOUNT(0)),
 
 	dump_register(GHWPARAMS8),
+	dump_register(GFLADJ),
 	dump_register(DCFG),
 	dump_register(DCTL),
 	dump_register(DEVTEN),
@@ -396,7 +402,7 @@ static ssize_t dwc3_mode_write(struct file *file,
 	struct dwc3		*dwc = s->private;
 	unsigned long		flags;
 	u32			mode = 0;
-	char			buf[32];
+	char buf[32] = {0};
 
 	if (copy_from_user(&buf, ubuf, min_t(size_t, sizeof(buf) - 1, count)))
 		return -EFAULT;
@@ -476,7 +482,7 @@ static ssize_t dwc3_testmode_write(struct file *file,
 	struct dwc3		*dwc = s->private;
 	unsigned long		flags;
 	u32			testmode = 0;
-	char			buf[32];
+	char			buf[32] = {0};
 
 	if (copy_from_user(&buf, ubuf, min_t(size_t, sizeof(buf) - 1, count)))
 		return -EFAULT;
@@ -583,7 +589,7 @@ static ssize_t dwc3_link_state_write(struct file *file,
 	struct dwc3		*dwc = s->private;
 	unsigned long		flags;
 	enum dwc3_link_state	state = 0;
-	char			buf[32];
+	char			buf[32] = {0};
 
 	if (copy_from_user(&buf, ubuf, min_t(size_t, sizeof(buf) - 1, count)))
 		return -EFAULT;
@@ -618,23 +624,476 @@ static const struct file_operations dwc3_link_state_fops = {
 	.release		= single_release,
 };
 
+static int ep_num;
+static ssize_t dwc3_store_ep_num(struct file *file, const char __user *ubuf,
+				 size_t count, loff_t *ppos)
+{
+	struct seq_file		*s = file->private_data;
+	struct dwc3		*dwc = s->private;
+	char			kbuf[10] = {0};
+	unsigned int		num, dir, temp;
+	unsigned long		flags;
+
+	if (copy_from_user(kbuf, ubuf, count > 10 ? 10 : count))
+		return -EFAULT;
+
+	if (sscanf(kbuf, "%u %u", &num, &dir) != 2)
+		return -EINVAL;
+
+	if (dir != 0 && dir != 1)
+		return -EINVAL;
+
+	temp = (num << 1) + dir;
+	if (temp >= (dwc->num_in_eps + dwc->num_out_eps) ||
+					temp >= DWC3_ENDPOINTS_NUM)
+		return -EINVAL;
+
+	spin_lock_irqsave(&dwc->lock, flags);
+	ep_num = temp;
+	spin_unlock_irqrestore(&dwc->lock, flags);
+
+	return count;
+}
+
+static int dwc3_ep_req_list_show(struct seq_file *s, void *unused)
+{
+	struct dwc3		*dwc = s->private;
+	struct dwc3_ep		*dep;
+	struct dwc3_request	*req = NULL;
+	struct list_head	*ptr = NULL;
+	unsigned long		flags;
+
+	spin_lock_irqsave(&dwc->lock, flags);
+	dep = dwc->eps[ep_num];
+
+	seq_printf(s, "%s request list: flags: 0x%x\n", dep->name, dep->flags);
+	list_for_each(ptr, &dep->request_list) {
+		req = list_entry(ptr, struct dwc3_request, list);
+
+		seq_printf(s,
+			"req:0x%pK len: %d sts: %d dma:0x%pKa num_sgs: %d\n",
+			req, req->request.length, req->request.status,
+			&req->request.dma, req->request.num_sgs);
+	}
+	spin_unlock_irqrestore(&dwc->lock, flags);
+
+	return 0;
+}
+
+static int dwc3_ep_req_list_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, dwc3_ep_req_list_show, inode->i_private);
+}
+
+static const struct file_operations dwc3_ep_req_list_fops = {
+	.open			= dwc3_ep_req_list_open,
+	.write			= dwc3_store_ep_num,
+	.read			= seq_read,
+	.llseek			= seq_lseek,
+	.release		= single_release,
+};
+
+static int dwc3_ep_queued_req_show(struct seq_file *s, void *unused)
+{
+	struct dwc3		*dwc = s->private;
+	struct dwc3_ep		*dep;
+	struct dwc3_request	*req = NULL;
+	struct list_head	*ptr = NULL;
+	unsigned long		flags;
+
+	spin_lock_irqsave(&dwc->lock, flags);
+	dep = dwc->eps[ep_num];
+
+	seq_printf(s, "%s queued reqs to HW: flags:0x%x\n", dep->name,
+								dep->flags);
+	list_for_each(ptr, &dep->req_queued) {
+		req = list_entry(ptr, struct dwc3_request, list);
+
+		seq_printf(s,
+			"req:0x%pK len:%d sts:%d dma:%pKa nsg:%d trb:0x%pK\n",
+			req, req->request.length, req->request.status,
+			&req->request.dma, req->request.num_sgs, req->trb);
+	}
+	spin_unlock_irqrestore(&dwc->lock, flags);
+
+	return 0;
+}
+
+static int dwc3_ep_queued_req_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, dwc3_ep_queued_req_show, inode->i_private);
+}
+
+const struct file_operations dwc3_ep_req_queued_fops = {
+	.open			= dwc3_ep_queued_req_open,
+	.write			= dwc3_store_ep_num,
+	.read			= seq_read,
+	.llseek			= seq_lseek,
+	.release		= single_release,
+};
+
+static int dwc3_ep_trbs_show(struct seq_file *s, void *unused)
+{
+	struct dwc3		*dwc = s->private;
+	struct dwc3_ep		*dep;
+	struct dwc3_trb		*trb;
+	unsigned long		flags;
+	int			j;
+
+	if (!ep_num)
+		return 0;
+
+	spin_lock_irqsave(&dwc->lock, flags);
+	dep = dwc->eps[ep_num];
+	if (!dep->trb_pool) {
+		spin_unlock_irqrestore(&dwc->lock, flags);
+		return 0;
+	}
+
+	seq_printf(s, "%s trb pool: flags:0x%x freeslot:%d busyslot:%d\n",
+		dep->name, dep->flags, dep->free_slot, dep->busy_slot);
+	for (j = 0; j < DWC3_TRB_NUM; j++) {
+		trb = &dep->trb_pool[j];
+		seq_printf(s, "trb:0x%pK bph:0x%x bpl:0x%x size:0x%x ctrl: %x\n",
+			trb, trb->bph, trb->bpl, trb->size, trb->ctrl);
+	}
+	spin_unlock_irqrestore(&dwc->lock, flags);
+
+	return 0;
+}
+
+static int dwc3_ep_trbs_list_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, dwc3_ep_trbs_show, inode->i_private);
+}
+
+const struct file_operations dwc3_ep_trb_list_fops = {
+	.open			= dwc3_ep_trbs_list_open,
+	.write			= dwc3_store_ep_num,
+	.read			= seq_read,
+	.llseek			= seq_lseek,
+	.release		= single_release,
+};
+
+static unsigned int ep_addr_rxdbg_mask = 1;
+module_param(ep_addr_rxdbg_mask, uint, S_IRUGO | S_IWUSR);
+static unsigned int ep_addr_txdbg_mask = 1;
+module_param(ep_addr_txdbg_mask, uint, S_IRUGO | S_IWUSR);
+
+static struct dwc3 *dbg_dwc3_data[DWC_CTRL_COUNT];
+
+static int allow_dbg_print(u8 ep_num)
+{
+	int dir, num;
+
+	/* allow bus wide events */
+	if (ep_num == 0xff)
+		return 1;
+
+	dir = ep_num & 0x1;
+	num = ep_num >> 1;
+	num = 1 << num;
+
+	if (dir && (num & ep_addr_txdbg_mask))
+		return 1;
+	if (!dir && (num & ep_addr_rxdbg_mask))
+		return 1;
+
+	return 0;
+}
+
+/**
+ * dwc3_dbg_print:  prints the common part of the event
+ * @addr:   endpoint address
+ * @name:   event name
+ * @status: status
+ * @extra:  extra information
+ * @dwc3: pointer to struct dwc3
+ */
+void dwc3_dbg_print(struct dwc3 *dwc, u8 ep_num, const char *name,
+			int status, const char *extra)
+{
+	if (!allow_dbg_print(ep_num))
+		return;
+
+	if (name == NULL)
+		return;
+
+	ipc_log_string(dwc->dwc_ipc_log_ctxt, "%02X %-12.12s %4i ?\t%s",
+			ep_num, name, status, extra);
+}
+
+/**
+ * dwc3_dbg_done: prints a DONE event
+ * @addr:   endpoint address
+ * @td:     transfer descriptor
+ * @status: status
+ * @dwc3: pointer to struct dwc3
+ */
+void dwc3_dbg_done(struct dwc3 *dwc, u8 ep_num,
+		const u32 count, int status)
+{
+	if (!allow_dbg_print(ep_num))
+		return;
+
+	ipc_log_string(dwc->dwc_ipc_log_ctxt, "%02X %-12.12s %4i ?\t%d",
+			ep_num, "DONE", status, count);
+}
+
+/*
+ * dwc3_dbg_queue: prints a QUEUE event
+ * @addr:   endpoint address
+ * @req:    USB request
+ * @status: status
+ */
+void dwc3_dbg_queue(struct dwc3 *dwc, u8 ep_num,
+		const struct usb_request *req, int status)
+{
+	if (!allow_dbg_print(ep_num))
+		return;
+
+	if (req != NULL) {
+		ipc_log_string(dwc->dwc_ipc_log_ctxt,
+			"%02X %-12.12s %4i ?\t%d %d", ep_num, "QUEUE", status,
+			!req->no_interrupt, req->length);
+	}
+}
+
+/**
+ * dwc3_dbg_setup: prints a SETUP event
+ * @addr: endpoint address
+ * @req:  setup request
+ */
+void dwc3_dbg_setup(struct dwc3 *dwc, u8 ep_num,
+		const struct usb_ctrlrequest *req)
+{
+	if (!allow_dbg_print(ep_num))
+		return;
+
+	if (req != NULL) {
+		ipc_log_string(dwc->dwc_ipc_log_ctxt,
+			"%02X %-12.12s ?\t%02X %02X %04X %04X %d",
+			ep_num, "SETUP", req->bRequestType,
+			req->bRequest, le16_to_cpu(req->wValue),
+			le16_to_cpu(req->wIndex), le16_to_cpu(req->wLength));
+	}
+}
+
+/**
+ * dwc3_dbg_print_reg: prints a reg value
+ * @name:   reg name
+ * @reg: reg value to be printed
+ */
+void dwc3_dbg_print_reg(struct dwc3 *dwc, const char *name, int reg)
+{
+	if (name == NULL)
+		return;
+
+	ipc_log_string(dwc->dwc_ipc_log_ctxt, "%s = 0x%08x", name, reg);
+}
+
+static ssize_t dwc3_store_int_events(struct file *file,
+			const char __user *ubuf, size_t count, loff_t *ppos)
+{
+	int i, ret;
+	unsigned long flags;
+	struct seq_file *s = file->private_data;
+	struct dwc3 *dwc = s->private;
+	struct dwc3_ep *dep;
+	struct timespec ts;
+	u8 clear_stats;
+
+	if (ubuf == NULL) {
+		pr_err("[%s] EINVAL\n", __func__);
+		ret = -EINVAL;
+		return ret;
+	}
+
+	ret = kstrtou8_from_user(ubuf, count, 0, &clear_stats);
+	if (ret < 0) {
+		pr_err("can't get enter value.\n");
+		return ret;
+	}
+
+	if (clear_stats != 0) {
+		pr_err("Wrong value. To clear stats, enter value as 0.\n");
+		ret = -EINVAL;
+		return ret;
+	}
+
+	spin_lock_irqsave(&dwc->lock, flags);
+
+	pr_debug("%s(): clearing debug interrupt buffers\n", __func__);
+	ts = current_kernel_time();
+	for (i = 0; i < DWC3_ENDPOINTS_NUM; i++) {
+		dep = dwc->eps[i];
+		memset(&dep->dbg_ep_events, 0, sizeof(dep->dbg_ep_events));
+		memset(&dep->dbg_ep_events_diff, 0, sizeof(dep->dbg_ep_events));
+		dep->dbg_ep_events_ts = ts;
+	}
+	memset(&dwc->dbg_gadget_events, 0, sizeof(dwc->dbg_gadget_events));
+
+	spin_unlock_irqrestore(&dwc->lock, flags);
+
+	return count;
+}
+
+static int dwc3_gadget_int_events_show(struct seq_file *s, void *unused)
+{
+	unsigned long   flags;
+	struct dwc3 *dwc = s->private;
+	struct dwc3_gadget_events *dbg_gadget_events;
+	struct dwc3_ep *dep;
+	int i;
+	struct timespec ts_delta;
+	struct timespec ts_current;
+	u32 ts_delta_ms;
+
+	spin_lock_irqsave(&dwc->lock, flags);
+	dbg_gadget_events = &dwc->dbg_gadget_events;
+
+	for (i = 0; i < DWC3_ENDPOINTS_NUM; i++) {
+		dep = dwc->eps[i];
+
+		if (dep == NULL || !(dep->flags & DWC3_EP_ENABLED))
+			continue;
+
+		ts_current = current_kernel_time();
+		ts_delta = timespec_sub(ts_current, dep->dbg_ep_events_ts);
+		ts_delta_ms = ts_delta.tv_nsec / NSEC_PER_MSEC +
+			ts_delta.tv_sec * MSEC_PER_SEC;
+
+		seq_printf(s, "\n\n===== dbg_ep_events for EP(%d) %s =====\n",
+			i, dep->name);
+		seq_printf(s, "xfercomplete:%u @ %luHz\n",
+			dep->dbg_ep_events.xfercomplete,
+			ep_event_rate(xfercomplete, dep->dbg_ep_events,
+				dep->dbg_ep_events_diff, ts_delta_ms));
+		seq_printf(s, "xfernotready:%u @ %luHz\n",
+			dep->dbg_ep_events.xfernotready,
+			ep_event_rate(xfernotready, dep->dbg_ep_events,
+				dep->dbg_ep_events_diff, ts_delta_ms));
+		seq_printf(s, "control_data:%u @ %luHz\n",
+			dep->dbg_ep_events.control_data,
+			ep_event_rate(control_data, dep->dbg_ep_events,
+				dep->dbg_ep_events_diff, ts_delta_ms));
+		seq_printf(s, "control_status:%u @ %luHz\n",
+			dep->dbg_ep_events.control_status,
+			ep_event_rate(control_status, dep->dbg_ep_events,
+				dep->dbg_ep_events_diff, ts_delta_ms));
+		seq_printf(s, "xferinprogress:%u @ %luHz\n",
+			dep->dbg_ep_events.xferinprogress,
+			ep_event_rate(xferinprogress, dep->dbg_ep_events,
+				dep->dbg_ep_events_diff, ts_delta_ms));
+		seq_printf(s, "rxtxfifoevent:%u @ %luHz\n",
+			dep->dbg_ep_events.rxtxfifoevent,
+			ep_event_rate(rxtxfifoevent, dep->dbg_ep_events,
+				dep->dbg_ep_events_diff, ts_delta_ms));
+		seq_printf(s, "streamevent:%u @ %luHz\n",
+			dep->dbg_ep_events.streamevent,
+			ep_event_rate(streamevent, dep->dbg_ep_events,
+				dep->dbg_ep_events_diff, ts_delta_ms));
+		seq_printf(s, "epcmdcomplt:%u @ %luHz\n",
+			dep->dbg_ep_events.epcmdcomplete,
+			ep_event_rate(epcmdcomplete, dep->dbg_ep_events,
+				dep->dbg_ep_events_diff, ts_delta_ms));
+		seq_printf(s, "cmdcmplt:%u @ %luHz\n",
+			dep->dbg_ep_events.cmdcmplt,
+			ep_event_rate(cmdcmplt, dep->dbg_ep_events,
+				dep->dbg_ep_events_diff, ts_delta_ms));
+		seq_printf(s, "unknown:%u @ %luHz\n",
+			dep->dbg_ep_events.unknown_event,
+			ep_event_rate(unknown_event, dep->dbg_ep_events,
+				dep->dbg_ep_events_diff, ts_delta_ms));
+		seq_printf(s, "total:%u @ %luHz\n",
+			dep->dbg_ep_events.total,
+			ep_event_rate(total, dep->dbg_ep_events,
+				dep->dbg_ep_events_diff, ts_delta_ms));
+
+		dep->dbg_ep_events_ts = ts_current;
+		dep->dbg_ep_events_diff = dep->dbg_ep_events;
+	}
+
+	seq_puts(s, "\n=== dbg_gadget events ==\n");
+	seq_printf(s, "disconnect:%u\n reset:%u\n",
+		dbg_gadget_events->disconnect, dbg_gadget_events->reset);
+	seq_printf(s, "connect:%u\n wakeup:%u\n",
+		dbg_gadget_events->connect, dbg_gadget_events->wakeup);
+	seq_printf(s, "link_status_change:%u\n eopf:%u\n",
+		dbg_gadget_events->link_status_change, dbg_gadget_events->eopf);
+	seq_printf(s, "sof:%u\n suspend:%u\n",
+		dbg_gadget_events->sof, dbg_gadget_events->suspend);
+	seq_printf(s, "erratic_error:%u\n overflow:%u\n",
+		dbg_gadget_events->erratic_error,
+		dbg_gadget_events->overflow);
+	seq_printf(s, "vendor_dev_test_lmp:%u\n cmdcmplt:%u\n",
+		dbg_gadget_events->vendor_dev_test_lmp,
+		dbg_gadget_events->cmdcmplt);
+	seq_printf(s, "unknown_event:%u\n", dbg_gadget_events->unknown_event);
+
+	seq_printf(s, "\n\t== Last %d interrupts stats ==\t\n", MAX_INTR_STATS);
+	seq_puts(s, "@ time (us):\t");
+	for (i = 0; i < MAX_INTR_STATS; i++)
+		seq_printf(s, "%lld\t", ktime_to_us(dwc->irq_start_time[i]));
+	seq_puts(s, "\nhard irq time (us):\t");
+	for (i = 0; i < MAX_INTR_STATS; i++)
+		seq_printf(s, "%d\t", dwc->irq_completion_time[i]);
+	seq_puts(s, "\nevents count:\t\t");
+	for (i = 0; i < MAX_INTR_STATS; i++)
+		seq_printf(s, "%d\t", dwc->irq_event_count[i]);
+	seq_puts(s, "\nbh handled count:\t");
+	for (i = 0; i < MAX_INTR_STATS; i++)
+		seq_printf(s, "%d\t", dwc->bh_handled_evt_cnt[i]);
+	seq_puts(s, "\nirq thread time (us):\t");
+	for (i = 0; i < MAX_INTR_STATS; i++)
+		seq_printf(s, "%d\t", dwc->bh_completion_time[i]);
+	seq_putc(s, '\n');
+
+	seq_printf(s, "t_pwr evt irq : %lld\n",
+			ktime_to_us(dwc->t_pwr_evt_irq));
+
+	seq_printf(s, "l1_remote_wakeup_cnt : %lu\n",
+		dwc->l1_remote_wakeup_cnt);
+
+	spin_unlock_irqrestore(&dwc->lock, flags);
+	return 0;
+}
+
+static int dwc3_gadget_events_open(struct inode *inode, struct file *f)
+{
+	return single_open(f, dwc3_gadget_int_events_show, inode->i_private);
+}
+
+const struct file_operations dwc3_gadget_dbg_events_fops = {
+	.open		= dwc3_gadget_events_open,
+	.read		= seq_read,
+	.write		= dwc3_store_int_events,
+	.llseek		= seq_lseek,
+	.release	= single_release,
+};
+
+static int count;
 int dwc3_debugfs_init(struct dwc3 *dwc)
 {
 	struct dentry		*root;
 	struct dentry		*file;
-	int			ret;
+
+	if (count >= DWC_CTRL_COUNT) {
+		dev_err(dwc->dev, "Err dwc instance %d >= %d available\n",
+				count, DWC_CTRL_COUNT);
+		return -EINVAL;
+	}
 
 	root = debugfs_create_dir(dev_name(dwc->dev), NULL);
 	if (!root) {
-		ret = -ENOMEM;
-		goto err0;
+		dev_err(dwc->dev, "Can't create debugfs root\n");
+		return -ENOMEM;
 	}
 
 	dwc->root = root;
 
 	dwc->regset = kzalloc(sizeof(*dwc->regset), GFP_KERNEL);
 	if (!dwc->regset) {
-		ret = -ENOMEM;
 		goto err1;
 	}
 
@@ -644,7 +1103,7 @@ int dwc3_debugfs_init(struct dwc3 *dwc)
 
 	file = debugfs_create_regset32("regdump", S_IRUGO, root, dwc->regset);
 	if (!file) {
-		ret = -ENOMEM;
+		dev_dbg(dwc->dev, "Can't create debugfs regdump\n");
 		goto err1;
 	}
 
@@ -652,7 +1111,7 @@ int dwc3_debugfs_init(struct dwc3 *dwc)
 		file = debugfs_create_file("mode", S_IRUGO | S_IWUSR, root,
 				dwc, &dwc3_mode_fops);
 		if (!file) {
-			ret = -ENOMEM;
+			dev_dbg(dwc->dev, "Can't create debugfs mode\n");
 			goto err1;
 		}
 	}
@@ -662,29 +1121,70 @@ int dwc3_debugfs_init(struct dwc3 *dwc)
 		file = debugfs_create_file("testmode", S_IRUGO | S_IWUSR, root,
 				dwc, &dwc3_testmode_fops);
 		if (!file) {
-			ret = -ENOMEM;
+			dev_dbg(dwc->dev, "Can't create debugfs testmode\n");
 			goto err1;
 		}
 
 		file = debugfs_create_file("link_state", S_IRUGO | S_IWUSR, root,
 				dwc, &dwc3_link_state_fops);
 		if (!file) {
-			ret = -ENOMEM;
+			dev_dbg(dwc->dev, "Can't create debugfs linkstate\n");
 			goto err1;
 		}
 	}
 
+	file = debugfs_create_file("trbs", S_IRUGO | S_IWUSR, root,
+			dwc, &dwc3_ep_trb_list_fops);
+	if (!file) {
+		dev_dbg(dwc->dev, "Can't create debugfs trbs\n");
+		goto err1;
+	}
+
+	file = debugfs_create_file("requests", S_IRUGO | S_IWUSR, root,
+			dwc, &dwc3_ep_req_list_fops);
+	if (!file) {
+		dev_dbg(dwc->dev, "Can't create debugfs requests\n");
+		goto err1;
+	}
+
+	file = debugfs_create_file("queued_reqs", S_IRUGO | S_IWUSR, root,
+			dwc, &dwc3_ep_req_queued_fops);
+	if (!file) {
+		dev_dbg(dwc->dev, "Can't create debugfs queued_reqs\n");
+		goto err1;
+	}
+
+	file = debugfs_create_file("int_events", S_IRUGO | S_IWUSR, root,
+			dwc, &dwc3_gadget_dbg_events_fops);
+	if (!file) {
+		dev_dbg(dwc->dev, "Can't create debugfs int_events\n");
+		goto err1;
+	}
+
+	dwc->dwc_ipc_log_ctxt = ipc_log_context_create(NUM_LOG_PAGES,
+					dev_name(dwc->dev), 0);
+	if (!dwc->dwc_ipc_log_ctxt) {
+		dev_err(dwc->dev, "Error getting ipc_log_ctxt\n");
+		goto err1;
+	}
+
+	dbg_dwc3_data[count] = dwc;
+	count++;
 	return 0;
 
 err1:
+	kfree(dwc->regset);
+	dwc->regset = NULL;
 	debugfs_remove_recursive(root);
-
-err0:
-	return ret;
+	return -ENOMEM;
 }
 
 void dwc3_debugfs_exit(struct dwc3 *dwc)
 {
 	debugfs_remove_recursive(dwc->root);
 	dwc->root = NULL;
+	kfree(dwc->regset);
+	dwc->regset = NULL;
+	ipc_log_context_destroy(dwc->dwc_ipc_log_ctxt);
+	dwc->dwc_ipc_log_ctxt = NULL;
 }

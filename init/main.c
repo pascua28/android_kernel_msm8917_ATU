@@ -79,6 +79,15 @@
 #include <linux/random.h>
 #include <linux/list.h>
 
+#ifdef CONFIG_HUAWEI_BOOT_TIME
+#include <linux/hw_boottime.h>
+#endif
+
+/* AR0009CRQN yuanshuai 20170919 begin */
+#include <chipset_common/bfmr/bfm/chipsets/bfm_chipsets.h>
+#include <chipset_common/bfmr/bfm/chipsets/qcom/bfm_qcom.h>
+/* AR0009CRQN yuanshuai 20170919 end */
+
 #include <asm/io.h>
 #include <asm/bugs.h>
 #include <asm/setup.h>
@@ -233,7 +242,8 @@ static int __init loglevel(char *str)
 early_param("loglevel", loglevel);
 
 /* Change NUL term back to "=", to make "param" the whole string. */
-static int __init repair_env_string(char *param, char *val, const char *unused)
+static int __init repair_env_string(char *param, char *val,
+				    const char *unused, void *arg)
 {
 	if (val) {
 		/* param=val or param="val"? */
@@ -250,14 +260,15 @@ static int __init repair_env_string(char *param, char *val, const char *unused)
 }
 
 /* Anything after -- gets handed straight to init. */
-static int __init set_init_arg(char *param, char *val, const char *unused)
+static int __init set_init_arg(char *param, char *val,
+			       const char *unused, void *arg)
 {
 	unsigned int i;
 
 	if (panic_later)
 		return 0;
 
-	repair_env_string(param, val, unused);
+	repair_env_string(param, val, unused, NULL);
 
 	for (i = 0; argv_init[i]; i++) {
 		if (i == MAX_INIT_ARGS) {
@@ -274,9 +285,10 @@ static int __init set_init_arg(char *param, char *val, const char *unused)
  * Unknown boot options get handed to init, unless they look like
  * unused parameters (modprobe will find them in /proc/cmdline).
  */
-static int __init unknown_bootoption(char *param, char *val, const char *unused)
+static int __init unknown_bootoption(char *param, char *val,
+				     const char *unused, void *arg)
 {
-	repair_env_string(param, val, unused);
+	repair_env_string(param, val, unused, NULL);
 
 	/* Handle obsolete-style parameters */
 	if (obsolete_checksetup(param))
@@ -392,6 +404,7 @@ static noinline void __init_refok rest_init(void)
 	int pid;
 
 	rcu_scheduler_starting();
+	smpboot_thread_init();
 	/*
 	 * We need to spawn init first so that it obtains pid 1, however
 	 * the init task will end up wanting to create kthreads, which, if
@@ -416,7 +429,8 @@ static noinline void __init_refok rest_init(void)
 }
 
 /* Check for early params. */
-static int __init do_early_param(char *param, char *val, const char *unused)
+static int __init do_early_param(char *param, char *val,
+				 const char *unused, void *arg)
 {
 	const struct obs_kernel_param *p;
 
@@ -435,7 +449,8 @@ static int __init do_early_param(char *param, char *val, const char *unused)
 
 void __init parse_early_options(char *cmdline)
 {
-	parse_args("early options", cmdline, NULL, 0, 0, 0, do_early_param);
+	parse_args("early options", cmdline, NULL, 0, 0, 0, NULL,
+		   do_early_param);
 }
 
 /* Arch code calls this early on, or if not, just before other parsing. */
@@ -494,6 +509,27 @@ static void __init mm_init(void)
 	vmalloc_init();
 }
 
+#ifdef CMDLINE_INFO_FILTER
+static void __init filter_args(char *cmdline) {
+	static char tmp_cmdline[COMMAND_LINE_SIZE] __initdata;
+	char *cmd_prefix = NULL;
+	char *cmd_suffix = NULL;
+	int len = 0;
+	strlcpy(tmp_cmdline, cmdline, COMMAND_LINE_SIZE);
+	cmd_prefix = strstr(tmp_cmdline, "androidboot.serialno");
+	if (cmd_prefix == NULL) {
+		pr_notice("Kernel command line: %s\n", tmp_cmdline);
+		return;
+	}
+	cmd_suffix = strstr(cmd_prefix, " ");
+	len = (cmd_suffix != NULL) ? (cmd_suffix - cmd_prefix)
+                             : (cmdline + strlen(cmdline) - cmd_prefix);
+	memset(cmd_prefix, '*', len);
+	pr_notice("Kernel command line: %s\n", tmp_cmdline);
+	return;
+}
+#endif
+
 asmlinkage __visible void __init start_kernel(void)
 {
 	char *command_line;
@@ -508,11 +544,6 @@ asmlinkage __visible void __init start_kernel(void)
 	smp_setup_processor_id();
 	debug_objects_early_init();
 
-	/*
-	 * Set up the the initial canary ASAP:
-	 */
-	boot_init_stack_canary();
-
 	cgroup_init_early();
 
 	local_irq_disable();
@@ -526,6 +557,10 @@ asmlinkage __visible void __init start_kernel(void)
 	page_address_init();
 	pr_notice("%s", linux_banner);
 	setup_arch(&command_line);
+	/*
+	 * Set up the the initial canary ASAP:
+	 */
+	boot_init_stack_canary();
 	mm_init_cpumask(&init_mm);
 	setup_command_line(command_line);
 	setup_nr_cpu_ids();
@@ -535,15 +570,18 @@ asmlinkage __visible void __init start_kernel(void)
 	build_all_zonelists(NULL, NULL);
 	page_alloc_init();
 
-	pr_notice("Kernel command line: %s\n", boot_command_line);
+#ifdef CMDLINE_INFO_FILTER
+	filter_args(boot_command_line);
+#endif
+
 	parse_early_param();
 	after_dashes = parse_args("Booting kernel",
 				  static_command_line, __start___param,
 				  __stop___param - __start___param,
-				  -1, -1, &unknown_bootoption);
+				  -1, -1, NULL, &unknown_bootoption);
 	if (!IS_ERR_OR_NULL(after_dashes))
 		parse_args("Setting init args", after_dashes, NULL, 0, -1, -1,
-			   set_init_arg);
+			   NULL, set_init_arg);
 
 	jump_label_init();
 
@@ -557,6 +595,8 @@ asmlinkage __visible void __init start_kernel(void)
 	sort_main_extable();
 	trap_init();
 	mm_init();
+
+	hwboot_fail_init_struct();
 
 	/*
 	 * Set up the scheduler prior starting any interrupts (such as the
@@ -790,7 +830,14 @@ int __init_or_module do_one_initcall(initcall_t fn)
 	if (initcall_debug)
 		ret = do_one_initcall_debug(fn);
 	else
+	{
+#ifdef CONFIG_HUAWEI_BOOT_TIME
+		ret = do_boottime_initcall(fn);
+#else
 		ret = fn();
+#endif
+	}
+		
 
 	msgbuf[0] = 0;
 
@@ -843,16 +890,62 @@ static char *initcall_level_names[] __initdata = {
 	"late",
 };
 
+/* AR0009CRQN yuanshuai 20170919 begin */
+#ifdef CONFIG_HUAWEI_BOOT_TIME
+extern void log_boot(char *str);
+#endif
+/* AR0009CRQN yuanshuai 20170919 end */
 static void __init do_initcall_level(int level)
 {
 	initcall_t *fn;
+
+/* AR0009CRQN yuanshuai 20170919 begin */    
+    switch(level)
+	{
+		case 0:
+			bfm_set_boot_stage(KERNEL_EARLY_INITCALL);
+			pr_info("Boot_monitor set stage:KERNEL_EARLY_INITCALL\n");
+			break;
+		case 1:
+			bfm_set_boot_stage(KERNEL_CORE_INITCALL_SYNC);
+			pr_info("Boot_monitor set stage:KERNEL_CORE_INITCALL_SYNC\n");
+			break;
+		case 2:
+			bfm_set_boot_stage(KERNEL_POSTCORE_INITCALL);
+			pr_info("Boot_monitor set stage:KERNEL_POSTCORE_INITCALL\n");
+			break;
+		case 3:
+			bfm_set_boot_stage(KERNEL_ARCH_INITCALL);;
+			pr_info("Boot_monitor set stage:KERNEL_ARCH_INITCALL\n");
+			break;
+		case 4:
+			bfm_set_boot_stage(KERNEL_SUBSYS_INITCALL);
+			pr_info("Boot_monitor set stage:KERNEL_SUBSYS_INITCALL\n");
+			break;
+		case 5:
+			bfm_set_boot_stage(KERNEL_FS_INITCALL);
+			pr_info("Boot_monitor set stage:KERNEL_FS_INITCALL\n");
+			break;
+		case 6:
+			bfm_set_boot_stage(KERNEL_DEVICE_INITCALL);
+			pr_info("Boot_monitor set stage:KERNEL_DEVICE_INITCALL\n");
+			break;
+		case 7:
+			bfm_set_boot_stage(KERNEL_LATE_INITCALL);
+			pr_info("Boot_monitor set stage:KERNEL_LATE_INITCALL\n");
+			break;
+		default:
+			pr_info("level is out of range ,no need set boot stage.\n");
+			break;
+	}
+/* AR0009CRQN yuanshuai 20170919 end */    
 
 	strcpy(initcall_command_line, saved_command_line);
 	parse_args(initcall_level_names[level],
 		   initcall_command_line, __start___param,
 		   __stop___param - __start___param,
 		   level, level,
-		   &repair_env_string);
+		   NULL, &repair_env_string);
 
 	for (fn = initcall_levels[level]; fn < initcall_levels[level+1]; fn++)
 		do_one_initcall(*fn);
@@ -929,6 +1022,7 @@ static int try_to_run_init_process(const char *init_filename)
 
 static noinline void __init kernel_init_freeable(void);
 
+
 #ifdef CONFIG_DEBUG_RODATA
 static bool rodata_enabled = true;
 static int __init set_debug_rodata(char *str)
@@ -964,6 +1058,12 @@ static int __ref kernel_init(void *unused)
 	numa_default_policy();
 
 	flush_delayed_fput();
+
+/* AR0009CRQN yuanshuai 20170919 begin */
+	#ifdef CONFIG_HUAWEI_BOOT_TIME
+    log_boot("Kernel_init_done");
+	#endif
+/* AR0009CRQN yuanshuai 20170919 end */    
 
 	if (ramdisk_execute_command) {
 		ret = run_init_process(ramdisk_execute_command);

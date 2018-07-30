@@ -98,6 +98,7 @@
 #include <asm/processor.h>
 #include <linux/atomic.h>
 
+#include <linux/kasan.h>
 #include <linux/kmemcheck.h>
 #include <linux/kmemleak.h>
 #include <linux/memory_hotplug.h>
@@ -214,8 +215,18 @@ static unsigned long jiffies_min_age;
 static unsigned long jiffies_last_scan;
 /* delay between automatic memory scannings */
 static signed long jiffies_scan_wait;
-/* enables or disables the task stacks scanning */
+
+/* Enables or disables the task stacks scanning.
+ * Set to 1 if at compile time we want it enabled.
+ * Else set to 0 to have it disabled by default.
+ * This can be enabled by writing to "stack=on" using
+ * kmemleak debugfs entry.*/
+#ifdef CONFIG_DEBUG_TASK_STACK_SCAN_OFF
+static int kmemleak_stack_scan;
+#else
 static int kmemleak_stack_scan = 1;
+#endif
+
 /* protects the memory scanning, parameters and debug/kmemleak file access */
 static DEFINE_MUTEX(scan_mutex);
 /* setting kmemleak=on, will set this var, skipping the disable */
@@ -1116,7 +1127,10 @@ static bool update_checksum(struct kmemleak_object *object)
 	if (!kmemcheck_is_obj_initialized(object->pointer, object->size))
 		return false;
 
+	kasan_disable_current();
 	object->checksum = crc32(0, (void *)object->pointer, object->size);
+	kasan_enable_current();
+
 	return object->checksum != old_csum;
 }
 
@@ -1167,7 +1181,9 @@ static void scan_block(void *_start, void *_end,
 						  BYTES_PER_POINTER))
 			continue;
 
+		kasan_disable_current();
 		pointer = *ptr;
+		kasan_enable_current();
 
 		object = find_and_get_object(pointer, 1);
 		if (!object)

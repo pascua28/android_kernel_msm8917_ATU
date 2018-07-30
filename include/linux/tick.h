@@ -77,6 +77,8 @@ struct tick_sched {
 
 extern void __init tick_init(void);
 extern int tick_is_oneshot_available(void);
+extern u64 jiffy_to_sched_clock(u64 *now, u64 *jiffy_sched_clock);
+extern u64 jiffy_to_ktime_ns(u64 *now, u64 *jiffy_ktime_ns);
 extern struct tick_device *tick_get_device(int cpu);
 
 # ifdef CONFIG_HIGH_RES_TIMERS
@@ -133,6 +135,12 @@ static inline int tick_nohz_tick_stopped(void)
 {
 	return __this_cpu_read(tick_cpu_sched.tick_stopped);
 }
+
+#if defined(CONFIG_GENERIC_CLOCKEVENTS_BROADCAST) && defined(CONFIG_TICK_ONESHOT)
+extern void hotplug_cpu__broadcast_tick_pull(int dead_cpu);
+#else
+static inline void hotplug_cpu__broadcast_tick_pull(int dead_cpu) { }
+#endif
 
 extern void tick_nohz_idle_enter(void);
 extern void tick_nohz_idle_exit(void);

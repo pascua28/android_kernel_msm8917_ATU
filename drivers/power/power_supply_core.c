@@ -56,6 +56,236 @@ static bool __power_supply_is_supplied_by(struct power_supply *supplier,
 	return false;
 }
 
+/**
+ * power_supply_set_voltage_limit - set current limit
+ * @psy:	the power supply to control
+ * @limit:	current limit in uV from the power supply.
+ *		0 will disable the power supply.
+ *
+ * This function will set a maximum supply current from a source
+ * and it will disable the charger when limit is 0.
+ */
+int power_supply_set_voltage_limit(struct power_supply *psy, int limit)
+{
+	const union power_supply_propval ret = {limit,};
+
+	if (psy->set_property)
+		return psy->set_property(psy, POWER_SUPPLY_PROP_VOLTAGE_MAX,
+								&ret);
+
+	return -ENXIO;
+}
+EXPORT_SYMBOL(power_supply_set_voltage_limit);
+
+
+/**
+ * power_supply_set_current_limit - set current limit
+ * @psy:	the power supply to control
+ * @limit:	current limit in uA from the power supply.
+ *		0 will disable the power supply.
+ *
+ * This function will set a maximum supply current from a source
+ * and it will disable the charger when limit is 0.
+ */
+int power_supply_set_current_limit(struct power_supply *psy, int limit)
+{
+	const union power_supply_propval ret = {limit,};
+
+	if (psy->set_property)
+		return psy->set_property(psy, POWER_SUPPLY_PROP_CURRENT_MAX,
+								&ret);
+
+	return -ENXIO;
+}
+EXPORT_SYMBOL_GPL(power_supply_set_current_limit);
+
+/**
+ * power_supply_set_charging_enabled - enable or disable charging
+ * @psy:	the power supply to control
+ * @enable:	sets enable property of power supply
+ */
+int power_supply_set_charging_enabled(struct power_supply *psy, bool enable)
+{
+	const union power_supply_propval ret = {enable,};
+
+	if (psy->set_property)
+		return psy->set_property(psy,
+				POWER_SUPPLY_PROP_CHARGING_ENABLED,
+				&ret);
+
+	return -ENXIO;
+}
+EXPORT_SYMBOL_GPL(power_supply_set_charging_enabled);
+
+/**
+ * power_supply_set_present - set present state of the power supply
+ * @psy:	the power supply to control
+ * @enable:	sets present property of power supply
+ */
+int power_supply_set_present(struct power_supply *psy, bool enable)
+{
+	const union power_supply_propval ret = {enable,};
+
+	if (psy->set_property)
+		return psy->set_property(psy, POWER_SUPPLY_PROP_PRESENT,
+								&ret);
+
+	return -ENXIO;
+}
+EXPORT_SYMBOL_GPL(power_supply_set_present);
+
+/**
+ * power_supply_set_online - set online state of the power supply
+ * @psy:	the power supply to control
+ * @enable:	sets online property of power supply
+ */
+int power_supply_set_online(struct power_supply *psy, bool enable)
+{
+	const union power_supply_propval ret = {enable,};
+
+	if (psy->set_property)
+		return psy->set_property(psy, POWER_SUPPLY_PROP_ONLINE,
+								&ret);
+
+	return -ENXIO;
+}
+EXPORT_SYMBOL_GPL(power_supply_set_online);
+
+
+/** power_supply_set_health_state - set health state of the power supply
+ * @psy:       the power supply to control
+ * @health:    sets health property of power supply
+ */
+int power_supply_set_health_state(struct power_supply *psy, int health)
+{
+	const union power_supply_propval ret = {health,};
+
+	if (psy->set_property)
+		return psy->set_property(psy, POWER_SUPPLY_PROP_HEALTH,
+		&ret);
+	return -ENXIO;
+}
+EXPORT_SYMBOL(power_supply_set_health_state);
+
+
+/**
+ * power_supply_set_scope - set scope of the power supply
+ * @psy:	the power supply to control
+ * @scope:	value to set the scope property to, should be from
+ *		the SCOPE enum in power_supply.h
+ */
+int power_supply_set_scope(struct power_supply *psy, int scope)
+{
+	const union power_supply_propval ret = {scope, };
+
+	if (psy->set_property)
+		return psy->set_property(psy, POWER_SUPPLY_PROP_SCOPE,
+								&ret);
+	return -ENXIO;
+}
+EXPORT_SYMBOL_GPL(power_supply_set_scope);
+
+/**
+ * power_supply_set_usb_otg - set otg of the usb power supply
+ * @psy:	the usb power supply to control
+ * @scope:	value to set the otg property to
+ */
+int power_supply_set_usb_otg(struct power_supply *psy, int otg)
+{
+	const union power_supply_propval ret = {otg, };
+
+	if (psy->set_property)
+		return psy->set_property(psy, POWER_SUPPLY_PROP_USB_OTG,
+								&ret);
+	return -ENXIO;
+}
+EXPORT_SYMBOL(power_supply_set_usb_otg);
+
+/**
+ * power_supply_set_supply_type - set type of the power supply
+ * @psy:	the power supply to control
+ * @supply_type:	sets type property of power supply
+ */
+int power_supply_set_supply_type(struct power_supply *psy,
+				enum power_supply_type supply_type)
+{
+	const union power_supply_propval ret = {supply_type,};
+
+	if (psy->set_property)
+		return psy->set_property(psy, POWER_SUPPLY_PROP_TYPE,
+								&ret);
+
+	return -ENXIO;
+}
+EXPORT_SYMBOL_GPL(power_supply_set_supply_type);
+
+/**
+ * power_supply_set_charge_type - set charge type of the power supply
+ * @psy:	the power supply to control
+ * @enable:	sets charge type property of power supply
+ */
+int power_supply_set_charge_type(struct power_supply *psy, int charge_type)
+{
+	const union power_supply_propval ret = {charge_type,};
+
+	if (psy->set_property)
+		return psy->set_property(psy, POWER_SUPPLY_PROP_CHARGE_TYPE,
+								&ret);
+
+	return -ENXIO;
+}
+EXPORT_SYMBOL_GPL(power_supply_set_charge_type);
+
+/**
+ * power_supply_set_hi_power_state - set power state for power_supply
+ * @psy:	the power supply to control
+ * @value:	value to be passed to the power_supply
+ *
+ */
+int power_supply_set_hi_power_state(struct power_supply *psy, int value)
+{
+	const union power_supply_propval ret = {value, };
+
+	if (psy->set_property)
+		return psy->set_property(psy, POWER_SUPPLY_PROP_HI_POWER,
+								&ret);
+	return -ENXIO;
+}
+EXPORT_SYMBOL(power_supply_set_hi_power_state);
+
+/**
+ * power_supply_set_low_power_state - set power state for power_supply
+ * @psy:	the power supply to control
+ * @value:	value to be passed to the power_supply
+ *
+ */
+int power_supply_set_low_power_state(struct power_supply *psy, int value)
+{
+	const union power_supply_propval ret = {value, };
+
+	if (psy->set_property)
+		return psy->set_property(psy, POWER_SUPPLY_PROP_LOW_POWER,
+								&ret);
+	return -ENXIO;
+}
+EXPORT_SYMBOL(power_supply_set_low_power_state);
+
+/**
+ * power_supply_set_dp_dm -
+ * @psy:	the power supply to control
+ * @value:	value to be passed to the power_supply
+ */
+int power_supply_set_dp_dm(struct power_supply *psy, int value)
+{
+	const union power_supply_propval ret = {value, };
+
+	if (psy->set_property)
+		return psy->set_property(psy, POWER_SUPPLY_PROP_DP_DM,
+				&ret);
+	return -ENXIO;
+}
+EXPORT_SYMBOL(power_supply_set_dp_dm);
+
 static int __power_supply_changed_work(struct device *dev, void *data)
 {
 	struct power_supply *psy = data;
@@ -314,7 +544,9 @@ EXPORT_SYMBOL_GPL(power_supply_is_system_supplied);
 
 int power_supply_set_battery_charged(struct power_supply *psy)
 {
-	if (psy->type == POWER_SUPPLY_TYPE_BATTERY && psy->set_charged) {
+	if (atomic_read(&psy->use_cnt) >= 0 &&
+			psy->type == POWER_SUPPLY_TYPE_BATTERY &&
+			psy->set_charged) {
 		psy->set_charged(psy);
 		return 0;
 	}
@@ -365,6 +597,47 @@ struct power_supply *power_supply_get_by_phandle(struct device_node *np,
 }
 EXPORT_SYMBOL_GPL(power_supply_get_by_phandle);
 #endif /* CONFIG_OF */
+
+int power_supply_get_property(struct power_supply *psy,
+				enum power_supply_property psp,
+				union power_supply_propval *val)
+{
+	if (atomic_read(&psy->use_cnt) <= 0)
+		return -ENODEV;
+
+	return psy->get_property(psy, psp, val);
+}
+EXPORT_SYMBOL_GPL(power_supply_get_property);
+
+int power_supply_set_property(struct power_supply *psy,
+				enum power_supply_property psp,
+				const union power_supply_propval *val)
+{
+	if (atomic_read(&psy->use_cnt) <= 0 || !psy->set_property)
+		return -ENODEV;
+
+	return psy->set_property(psy, psp, val);
+}
+EXPORT_SYMBOL_GPL(power_supply_set_property);
+
+int power_supply_property_is_writeable(struct power_supply *psy,
+				enum power_supply_property psp)
+{
+	if (atomic_read(&psy->use_cnt) <= 0 || !psy->property_is_writeable)
+		return -ENODEV;
+
+	return psy->property_is_writeable(psy, psp);
+}
+EXPORT_SYMBOL_GPL(power_supply_property_is_writeable);
+
+void power_supply_external_power_changed(struct power_supply *psy)
+{
+	if (atomic_read(&psy->use_cnt) <= 0 || !psy->external_power_changed)
+		return;
+
+	psy->external_power_changed(psy);
+}
+EXPORT_SYMBOL_GPL(power_supply_external_power_changed);
 
 int power_supply_powers(struct power_supply *psy, struct device *dev)
 {
@@ -553,6 +826,7 @@ static int __power_supply_register(struct device *parent,
 	dev->release = power_supply_dev_release;
 	dev_set_drvdata(dev, psy);
 	psy->dev = dev;
+	atomic_inc(&psy->use_cnt);
 
 	rc = dev_set_name(dev, "%s", psy->name);
 	if (rc)
@@ -619,6 +893,7 @@ EXPORT_SYMBOL_GPL(power_supply_register_no_ws);
 
 void power_supply_unregister(struct power_supply *psy)
 {
+	WARN_ON(atomic_dec_return(&psy->use_cnt));
 	cancel_work_sync(&psy->changed_work);
 	sysfs_remove_link(&psy->dev->kobj, "powers");
 	power_supply_remove_triggers(psy);
@@ -628,6 +903,12 @@ void power_supply_unregister(struct power_supply *psy)
 	device_unregister(psy->dev);
 }
 EXPORT_SYMBOL_GPL(power_supply_unregister);
+
+void *power_supply_get_drvdata(struct power_supply *psy)
+{
+	return psy->drv_data;
+}
+EXPORT_SYMBOL_GPL(power_supply_get_drvdata);
 
 static int __init power_supply_class_init(void)
 {

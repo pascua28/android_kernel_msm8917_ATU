@@ -60,7 +60,13 @@ config SPARSEMEM_MANUAL
 	  over this option.
 
 endchoice
-
+config SHRINK_MEMORY
+     bool "Allow for system-wide shrinking of memory"
+     default n
+     depends on MMU
+     help
+     It ebable support for system-wide memory reclaim in one shot using
+     echo 1 > /proc/sys/vm/shrink_memory
 config DISCONTIGMEM
 	def_bool y
 	depends on (!SELECT_MEMORY_MODEL && ARCH_DISCONTIGMEM_ENABLE) || DISCONTIGMEM_MANUAL
@@ -516,6 +522,12 @@ config CMA_DEBUG
 	  processing calls such as dma_alloc_from_contiguous().
 	  This option does not affect warning and error messages.
 
+config CMA_DEBUGFS
+	bool "CMA debugfs interface"
+	depends on CMA && DEBUG_FS
+	help
+	  Turns on the DebugFS interface for CMA.
+
 config CMA_AREAS
 	int "Maximum count of the CMA areas"
 	depends on CMA
@@ -628,3 +640,147 @@ config MAX_STACK_SIZE_MB
 	  changed to a smaller value in which case that is used.
 
 	  A sane initial value is 80 MB.
+
+config ZCACHE
+       bool "Compressed cache for file pages (EXPERIMENTAL)"
+       depends on CRYPTO && CLEANCACHE
+       select CRYPTO_LZO
+       select ZBUD
+       default n
+       help
+         A compressed cache for file pages.
+         It takes active file pages that are in the process of being reclaimed
+         and attempts to compress them into a dynamically allocated RAM-based
+         memory pool.
+
+         If this process is successful, when those file pages needed again, the
+         I/O reading operation was avoided. This results in a significant performance
+         gains under memory pressure for systems full with file pages.
+
+config BALANCE_ANON_FILE_RECLAIM
+	bool "During reclaim treat anon and file backed pages equally"
+	depends on SWAP
+	help
+	  When performing memory reclaim treat anonymous and file backed pages
+	  equally.
+	  Swapping anonymous pages out to memory can be efficient enough to justify
+	  treating anonymous and file backed pages equally.
+
+config KSWAPD_CPU_AFFINITY_MASK
+	string "kswapd cpu affinity mask"
+	depends on SMP
+	help
+	  Set the cpu affinity for the kswapd task.
+	  There can be power benefits on certain targets when limiting kswapd
+	  to run only on certain cores.
+	  The cpu affinity bitmask is represented by a hex string where commas
+	  group hex digits into chunks.  Each chunk defines exactly 32 bits of
+	  the resultant bitmask.
+	  For example to limit kswapd to the first 4 cores use the following:
+	  CONFIG_KSWAPD_CPU_AFFINITY_MASK="f"
+
+config FORCE_ALLOC_FROM_DMA_ZONE
+	bool "Force certain memory allocators to always return ZONE_DMA memory"
+	depends on ZONE_DMA
+	help
+	  Ensure certain memory allocators always return memory from ZONE_DMA.
+	  This option helps ensure that clients who require ZONE_DMA memory are
+	  always using ZONE_DMA memory.
+
+	  If unsure, say "n".
+
+config PROCESS_RECLAIM
+	bool "Enable process reclaim"
+	depends on PROC_FS
+	default n
+	help
+	 It allows to reclaim pages of the process by /proc/pid/reclaim.
+
+	 (echo file > /proc/PID/reclaim) reclaims file-backed pages only.
+	 (echo anon > /proc/PID/reclaim) reclaims anonymous pages only.
+	 (echo all > /proc/PID/reclaim) reclaims all pages.
+
+	 (echo addr size-byte > /proc/PID/reclaim) reclaims pages in
+	 (addr, addr + size-bytes) of the process.
+
+	 Any other vaule is ignored.
+
+config HUAWEI_SWAP_ZDATA
+	bool "Compressed data to swap"
+	depends on SWAP
+	depends on PROCESS_RECLAIM
+	default n
+	help
+	  Save compressed data to swap page.
+
+	  If unsure, say Y to enable swap_zdata.
+
+config HUAWEI_DIRECT_SWAPPINESS
+	bool "Allow to adjust direct reclaim swappiness"
+	depends on SWAP && PROC_FS
+	default n
+	help
+	  Used to adjust direct reclaim cmpress priority by /proc/sys/vm/direct_swappiness.
+
+	  only 0 to 60 is valid. If unsure, say N to use it's original value(60).
+
+config DEBUG_VMALLOC
+	bool "Enable VMALLOC debugging support"
+	help
+	  This enables the inclusion of a few debugging parameters, which
+	  are the PID and the name of the task requesting vmalloc.
+
+	  Disabling these can result in savings in code size.
+config HUAWEI_UNMOVABLE_ISOLATE
+	bool "Isolate the unmovable memory."
+
+	default n
+	  help
+	  Isolate the unmovable memory from others migrate types.
+	  So that we can improve the success rate of compact.
+
+	  If unsure, say "n".
+
+config HUAWEI_UNMOVABLE_ISOLATE1_SIZE_MBYTES
+	int "Size in Mega Bytes For UNMOVABLE_ISOLATE1"
+	depends on HUAWEI_UNMOVABLE_ISOLATE
+	default 64
+	help
+	  Defines the size (in MiB) of the default memory area for
+	  MIGRATE_UNMOVABLE_ISOLATE1 Memory Allocator. However,
+	  we should parse the size from /proc/cmdline firstly.
+
+config HUAWEI_UNMOVABLE_ISOLATE2_SIZE_MBYTES
+	int "Size in Mega Bytes For UNMOVABLE_ISOLATE2"
+	depends on HUAWEI_UNMOVABLE_ISOLATE
+	default 64
+	help
+	  Defines the size (in MiB) of the default memory area for
+	  MIGRATE_UNMOVABLE_ISOLATE2 Memory Allocator. However,
+	  we should parse the size from /proc/cmdline firstly.
+
+config HUAWEI_ENHANCED_RESERVE
+	bool "Reduce the MIGRATE_RESERVE fragmentat."
+	depends on HUAWEI_UNMOVABLE_ISOLATE
+	default n
+	help
+	  Allow allocate memory from RESERVE when the order is between
+	  RESERVE_MIN_ORDER and RESERVE_MAX_ORDER.
+	  So that improve the compact success rate.
+
+	  If unsure, say "n".
+
+config HUAWEI_ENHANCED_RESERVE_SIZE_MBYTES
+	int "Size in Mega Bytes For ENHANCED_RESERVE"
+	depends on HUAWEI_ENHANCED_RESERVE
+	default 2
+	help
+	  Defines the multiple size of the MIGRATE_RESERVE area.
+	  If the value of 1 is selected, use the default RESERVE area size.
+	  we should parse the size from /proc/cmdline firstly.
+
+config MM_DEBUG
+	bool "Enable MM DUMP support"
+	default n
+
+source "mm/hisi/Kconfig"

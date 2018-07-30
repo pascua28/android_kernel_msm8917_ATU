@@ -77,6 +77,9 @@
 #define TIOCGPKT	_IOR('T', 0x38, int) /* Get packet mode state */
 #define TIOCGPTLCK	_IOR('T', 0x39, int) /* Get Pty lock state */
 #define TIOCGEXCL	_IOR('T', 0x40, int) /* Get exclusive mode state */
+#define TIOCPMGET	0x5441	/* PM get */
+#define TIOCPMPUT	0x5442	/* PM put */
+#define TIOCPMACT	0x5443	/* PM is active */
 
 #define FIONCLEX	0x5450
 #define FIOCLEX		0x5451
@@ -93,6 +96,11 @@
 
 #define TIOCMIWAIT	0x545C	/* wait for a change on serial input line(s) */
 #define TIOCGICOUNT	0x545D	/* read serial port inline interrupt counts */
+
+#ifdef CONFIG_TASK_PROTECT_LRU
+#define FPROTECTLRUSET	0x545E
+#define FPROTECTLRUGET	0x545F
+#endif
 
 /*
  * Some arches already define FIOQSIZE due to a historical

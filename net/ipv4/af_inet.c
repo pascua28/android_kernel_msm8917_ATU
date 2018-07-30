@@ -134,6 +134,8 @@ static inline int current_has_network(void)
 }
 #endif
 
+int sysctl_reserved_port_bind __read_mostly = 1;
+
 /* The inetsw table contains everything that inet_create needs to
  * build a new socket.
  */
@@ -1354,6 +1356,7 @@ static struct sk_buff **inet_gro_receive(struct sk_buff **head,
 
 	for (p = *head; p; p = p->next) {
 		struct iphdr *iph2;
+		u16 flush_id;
 
 		if (!NAPI_GRO_CB(p)->same_flow)
 			continue;
@@ -1377,14 +1380,24 @@ static struct sk_buff **inet_gro_receive(struct sk_buff **head,
 			(iph->tos ^ iph2->tos) |
 			((iph->frag_off ^ iph2->frag_off) & htons(IP_DF));
 
-		/* Save the IP ID check to be included later when we get to
-		 * the transport layer so only the inner most IP ID is checked.
-		 * This is because some GSO/TSO implementations do not
-		 * correctly increment the IP ID for the outer hdrs.
-		 */
-		NAPI_GRO_CB(p)->flush_id =
-			    ((u16)(ntohs(iph2->id) + NAPI_GRO_CB(p)->count) ^ id);
 		NAPI_GRO_CB(p)->flush |= flush;
+
+		/* We must save the offset as it is possible to have multiple
+		 * flows using the same protocol and address pairs so we
+		 * need to wait until we can validate this is part of the
+		 * same flow with a 5-tuple or better to avoid unnecessary
+		 * collisions between flows.  We can support one of two
+		 * possible scenarios, either a fixed value with DF bit set
+		 * or an incrementing value with DF either set or unset.
+		 * In the case of a fixed value we will end up losing the
+		 * data that the IP ID was a fixed value, however per RFC
+		 * 6864 in such a case the actual value of the IP ID is
+		 * meant to be ignored anyway.
+		 */
+		flush_id = (u16)(id - ntohs(iph2->id));
+		if (flush_id || !(iph2->frag_off & htons(IP_DF)))
+			NAPI_GRO_CB(p)->flush_id |= flush_id ^
+						    NAPI_GRO_CB(p)->count;
 	}
 
 	NAPI_GRO_CB(skb)->flush |= flush;
@@ -1399,7 +1412,7 @@ static struct sk_buff **inet_gro_receive(struct sk_buff **head,
 	skb_gro_pull(skb, sizeof(*iph));
 	skb_set_transport_header(skb, skb_gro_offset(skb));
 
-	pp = ops->callbacks.gro_receive(head, skb);
+	pp = call_gro_receive(ops->callbacks.gro_receive, head, skb);
 
 out_unlock:
 	rcu_read_unlock();
@@ -1596,6 +1609,11 @@ static __net_init int ipv4_mib_init_net(struct net *net)
 	net->mib.tcp_statistics = alloc_percpu(struct tcp_mib);
 	if (!net->mib.tcp_statistics)
 		goto err_tcp_mib;
+#ifdef CONFIG_HW_WIFIPRO
+       net->mib.wifipro_tcp_statistics = alloc_percpu(struct wifipro_tcp_mib);
+       if (!net->mib.wifipro_tcp_statistics)
+               goto err_wifipro_tcp_mib;
+#endif
 	net->mib.ip_statistics = alloc_percpu(struct ipstats_mib);
 	if (!net->mib.ip_statistics)
 		goto err_ip_mib;
@@ -1638,6 +1656,10 @@ err_net_mib:
 	free_percpu(net->mib.ip_statistics);
 err_ip_mib:
 	free_percpu(net->mib.tcp_statistics);
+#ifdef CONFIG_HW_WIFIPRO
+err_wifipro_tcp_mib:
+    free_percpu(net->mib.wifipro_tcp_statistics);
+#endif
 err_tcp_mib:
 	return -ENOMEM;
 }
@@ -1650,6 +1672,9 @@ static __net_exit void ipv4_mib_exit_net(struct net *net)
 	free_percpu(net->mib.udp_statistics);
 	free_percpu(net->mib.net_statistics);
 	free_percpu(net->mib.ip_statistics);
+#ifdef CONFIG_HW_WIFIPRO
+    free_percpu(net->mib.wifipro_tcp_statistics);
+#endif
 	free_percpu(net->mib.tcp_statistics);
 }
 

@@ -120,6 +120,9 @@ EXPORT_SYMBOL_GPL(nf_conntrack_htable_size);
 unsigned int nf_conntrack_max __read_mostly;
 EXPORT_SYMBOL_GPL(nf_conntrack_max);
 
+unsigned int nf_conntrack_pkt_threshold __read_mostly;
+EXPORT_SYMBOL(nf_conntrack_pkt_threshold);
+
 DEFINE_PER_CPU(struct nf_conn, nf_conntrack_untracked);
 EXPORT_PER_CPU_SYMBOL(nf_conntrack_untracked);
 
@@ -287,17 +290,34 @@ static void nf_ct_del_from_dying_or_unconfirmed_list(struct nf_conn *ct)
 	spin_unlock(&pcpu->lock);
 }
 
+void (*delete_sfe_entry)(struct nf_conn *ct) __rcu __read_mostly;
+EXPORT_SYMBOL(delete_sfe_entry);
+
 static void
 destroy_conntrack(struct nf_conntrack *nfct)
 {
 	struct nf_conn *ct = (struct nf_conn *)nfct;
 	struct net *net = nf_ct_net(ct);
 	struct nf_conntrack_l4proto *l4proto;
+	struct sip_list *sip_node = NULL;
+	struct list_head *sip_node_list;
+	struct list_head *sip_node_save_list;
+	void (*delete_entry)(struct nf_conn *ct);
 
 	pr_debug("destroy_conntrack(%pK)\n", ct);
 	NF_CT_ASSERT(atomic_read(&nfct->use) == 0);
 	NF_CT_ASSERT(!timer_pending(&ct->timeout));
 
+	if (ct->sfe_entry != NULL) {
+		delete_entry = rcu_dereference(delete_sfe_entry);
+		if (delete_entry)
+			delete_entry(ct);
+	}
+
+	/* To make sure we don't get any weird locking issues here:
+	 * destroy_conntrack() MUST NOT be called with a write lock
+	 * to nf_conntrack_lock!!! -HW
+	*/
 	rcu_read_lock();
 	l4proto = __nf_ct_l4proto_find(nf_ct_l3num(ct), nf_ct_protonum(ct));
 	if (l4proto && l4proto->destroy)
@@ -306,6 +326,16 @@ destroy_conntrack(struct nf_conntrack *nfct)
 	rcu_read_unlock();
 
 	local_bh_disable();
+
+	pr_debug("freeing item in the SIP list\n");
+	if (ct->sip_segment_list.next != NULL)
+		list_for_each_safe(sip_node_list, sip_node_save_list,
+				   &ct->sip_segment_list) {
+			sip_node = list_entry(sip_node_list,
+					      struct sip_list, list);
+			list_del(&sip_node->list);
+			kfree(sip_node);
+		}
 	/* Expectations will have been removed in clean_from_lists,
 	 * except TFTP can create an expectation on the first packet,
 	 * before connection is in the list, so we need to clean here,
@@ -610,7 +640,7 @@ __nf_conntrack_confirm(struct sk_buff *skb)
 	 * confirmed us.
 	 */
 	NF_CT_ASSERT(!nf_ct_is_confirmed(ct));
-	pr_debug("Confirming conntrack %p\n", ct);
+	pr_debug("Confirming conntrack %pK\n", ct);
 	/* We have to check the DYING flag after unlink to prevent
 	 * a race against nf_ct_get_next_corpse() possibly called from
 	 * user context, else we insert an already 'dead' hash, blocking
@@ -838,6 +868,9 @@ __nf_conntrack_alloc(struct net *net, u16 zone,
 	/* Don't set timer yet: wait for confirmation */
 	setup_timer(&ct->timeout, death_by_timeout, (unsigned long)ct);
 	write_pnet(&ct->ct_net, net);
+#if defined(CONFIG_IP_NF_TARGET_NATTYPE_MODULE)
+	ct->nattype_entry = 0;
+#endif
 #ifdef CONFIG_NF_CONNTRACK_ZONES
 	if (zone) {
 		struct nf_conntrack_zone *nf_ct_zone;
@@ -948,6 +981,7 @@ init_conntrack(struct net *net, struct nf_conn *tmpl,
 			     GFP_ATOMIC);
 
 	local_bh_disable();
+	INIT_LIST_HEAD(&ct->sip_segment_list);
 	if (net->ct.expect_count) {
 		spin_lock(&nf_conntrack_expect_lock);
 		exp = nf_ct_find_expectation(net, zone, tuple);
@@ -970,6 +1004,10 @@ init_conntrack(struct net *net, struct nf_conn *tmpl,
 #endif
 #ifdef CONFIG_NF_CONNTRACK_SECMARK
 			ct->secmark = exp->master->secmark;
+#endif
+/* Initialize the NAT type entry. */
+#if defined(CONFIG_IP_NF_TARGET_NATTYPE_MODULE)
+		ct->nattype_entry = 0;
 #endif
 			NF_CT_STAT_INC(net, expect_new);
 		}
@@ -1210,6 +1248,9 @@ void __nf_ct_refresh_acct(struct nf_conn *ct,
 			  unsigned long extra_jiffies,
 			  int do_acct)
 {
+	struct nf_conn_acct *acct;
+	u64 pkts;
+
 	NF_CT_ASSERT(ct->timeout.data == (unsigned long)ct);
 	NF_CT_ASSERT(skb);
 
@@ -1230,16 +1271,30 @@ void __nf_ct_refresh_acct(struct nf_conn *ct,
 			mod_timer_pending(&ct->timeout, newtime);
 	}
 
+/* Refresh the NAT type entry. */
+#if defined(CONFIG_IP_NF_TARGET_NATTYPE_MODULE)
+	(void)nattype_refresh_timer(ct->nattype_entry, ct->timeout.expires);
+#endif
+
 acct:
 	if (do_acct) {
-		struct nf_conn_acct *acct;
-
 		acct = nf_conn_acct_find(ct);
 		if (acct) {
 			struct nf_conn_counter *counter = acct->counter;
 
 			atomic64_inc(&counter[CTINFO2DIR(ctinfo)].packets);
 			atomic64_add(skb->len, &counter[CTINFO2DIR(ctinfo)].bytes);
+
+			pkts =
+			atomic64_read(&counter[CTINFO2DIR(ctinfo)].packets) +
+			atomic64_read(&counter[!CTINFO2DIR(ctinfo)].packets);
+			/* Report if the packet threshold is reached. */
+			if ((nf_conntrack_pkt_threshold > 0) &&
+			    (pkts == nf_conntrack_pkt_threshold)) {
+				nf_conntrack_event_cache(IPCT_COUNTER, ct);
+				nf_conntrack_event_cache(IPCT_PROTOINFO, ct);
+				nf_ct_deliver_cached_events(ct);
+			}
 		}
 	}
 }

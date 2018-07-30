@@ -103,19 +103,6 @@ static void inet6_sk_rx_dst_set(struct sock *sk, const struct sk_buff *skb)
 	}
 }
 
-static void tcp_v6_hash(struct sock *sk)
-{
-	if (sk->sk_state != TCP_CLOSE) {
-		if (inet_csk(sk)->icsk_af_ops == &ipv6_mapped) {
-			tcp_prot.hash(sk);
-			return;
-		}
-		local_bh_disable();
-		__inet6_hash(sk, NULL);
-		local_bh_enable();
-	}
-}
-
 static __u32 tcp_v6_init_sequence(const struct sk_buff *skb)
 {
 	return secure_tcpv6_sequence_number(ipv6_hdr(skb)->daddr.s6_addr32,
@@ -238,11 +225,8 @@ static int tcp_v6_connect(struct sock *sk, struct sockaddr *uaddr,
 			tp->af_specific = &tcp_sock_ipv6_specific;
 #endif
 			goto failure;
-		} else {
-			ipv6_addr_set_v4mapped(inet->inet_saddr, &np->saddr);
-			ipv6_addr_set_v4mapped(inet->inet_rcv_saddr,
-					       &sk->sk_v6_rcv_saddr);
 		}
+		np->saddr = sk->sk_v6_rcv_saddr;
 
 		return err;
 	}
@@ -1103,11 +1087,7 @@ static struct sock *tcp_v6_syn_recv_sock(struct sock *sk, struct sk_buff *skb,
 
 		memcpy(newnp, np, sizeof(struct ipv6_pinfo));
 
-		ipv6_addr_set_v4mapped(newinet->inet_daddr, &newsk->sk_v6_daddr);
-
-		ipv6_addr_set_v4mapped(newinet->inet_saddr, &newnp->saddr);
-
-		newsk->sk_v6_rcv_saddr = newnp->saddr;
+		newnp->saddr = newsk->sk_v6_rcv_saddr;
 
 		inet_csk(newsk)->icsk_af_ops = &ipv6_mapped;
 		newsk->sk_backlog_rcv = tcp_v4_do_rcv;
@@ -1260,7 +1240,7 @@ static struct sock *tcp_v6_syn_recv_sock(struct sock *sk, struct sk_buff *skb,
 		tcp_done(newsk);
 		goto out;
 	}
-	__inet6_hash(newsk, NULL);
+	__inet_hash(newsk, NULL);
 
 	return newsk;
 
@@ -1298,7 +1278,7 @@ static int tcp_v6_do_rcv(struct sock *sk, struct sk_buff *skb)
 	if (skb->protocol == htons(ETH_P_IP))
 		return tcp_v4_do_rcv(sk, skb);
 
-	if (sk_filter(sk, skb))
+	if (tcp_filter(sk, skb))
 		goto discard;
 
 	/*
@@ -1494,8 +1474,10 @@ process:
 		goto discard_and_relse;
 #endif
 
-	if (sk_filter(sk, skb))
+	if (tcp_filter(sk, skb))
 		goto discard_and_relse;
+	th = (const struct tcphdr *)skb->data;
+	hdr = ipv6_hdr(skb);
 
 	sk_mark_napi_id(sk, skb);
 	skb->dev = NULL;
@@ -1567,8 +1549,7 @@ do_time_wait:
 					    ntohs(th->dest), tcp_v6_iif(skb));
 		if (sk2 != NULL) {
 			struct inet_timewait_sock *tw = inet_twsk(sk);
-			inet_twsk_deschedule(tw, &tcp_death_row);
-			inet_twsk_put(tw);
+			inet_twsk_deschedule_put(tw);
 			sk = sk2;
 			tcp_v6_restore_cb(skb);
 			goto process;
@@ -1758,6 +1739,7 @@ static void get_tcp6_sock(struct seq_file *seq, struct sock *sp, int i)
 	const struct tcp_sock *tp = tcp_sk(sp);
 	const struct inet_connection_sock *icsk = inet_csk(sp);
 	struct fastopen_queue *fastopenq = icsk->icsk_accept_queue.fastopenq;
+	__u8 state = sp->sk_state;
 
 	dest  = &sp->sk_v6_daddr;
 	src   = &sp->sk_v6_rcv_saddr;
@@ -1780,6 +1762,9 @@ static void get_tcp6_sock(struct seq_file *seq, struct sock *sp, int i)
 		timer_expires = jiffies;
 	}
 
+	if (inet->transparent)
+		state |= 0x80;
+
 	seq_printf(seq,
 		   "%4d: %08X%08X%08X%08X:%04X %08X%08X%08X%08X:%04X "
 		   "%02X %08X:%08X %02X:%08lX %08X %5u %8d %lu %d %pK %lu %lu %u %u %d\n",
@@ -1788,7 +1773,7 @@ static void get_tcp6_sock(struct seq_file *seq, struct sock *sp, int i)
 		   src->s6_addr32[2], src->s6_addr32[3], srcp,
 		   dest->s6_addr32[0], dest->s6_addr32[1],
 		   dest->s6_addr32[2], dest->s6_addr32[3], destp,
-		   sp->sk_state,
+		   state,
 		   tp->write_seq-tp->snd_una,
 		   (sp->sk_state == TCP_LISTEN) ? sp->sk_ack_backlog : (tp->rcv_nxt - tp->copied_seq),
 		   timer_active,
@@ -1811,9 +1796,9 @@ static void get_tcp6_sock(struct seq_file *seq, struct sock *sp, int i)
 static void get_timewait6_sock(struct seq_file *seq,
 			       struct inet_timewait_sock *tw, int i)
 {
+	long delta = tw->tw_timer.expires - jiffies;
 	const struct in6_addr *dest, *src;
 	__u16 destp, srcp;
-	s32 delta = tw->tw_ttd - inet_tw_time_stamp();
 
 	dest = &tw->tw_v6_daddr;
 	src  = &tw->tw_v6_rcv_saddr;
@@ -1922,7 +1907,7 @@ struct proto tcpv6_prot = {
 	.sendpage		= tcp_sendpage,
 	.backlog_rcv		= tcp_v6_do_rcv,
 	.release_cb		= tcp_release_cb,
-	.hash			= tcp_v6_hash,
+	.hash			= inet_hash,
 	.unhash			= inet_unhash,
 	.get_port		= inet_csk_get_port,
 	.enter_memory_pressure	= tcp_enter_memory_pressure,

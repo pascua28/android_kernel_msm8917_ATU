@@ -947,6 +947,7 @@ static struct request *__get_request(struct request_list *rl, int rw_flags,
 	struct io_cq *icq = NULL;
 	const bool is_sync = rw_is_sync(rw_flags) != 0;
 	int may_queue;
+	u64 cmd_flags = (u64)(unsigned int)rw_flags;
 
 	if (unlikely(blk_queue_dying(q)))
 		return ERR_PTR(-ENODEV);
@@ -1000,7 +1001,7 @@ static struct request *__get_request(struct request_list *rl, int rw_flags,
 
 	/*
 	 * Decide whether the new request will be managed by elevator.  If
-	 * so, mark @rw_flags and increment elvpriv.  Non-zero elvpriv will
+	 * so, mark @cmd_flags and increment elvpriv.  Non-zero elvpriv will
 	 * prevent the current elevator from being destroyed until the new
 	 * request is freed.  This guarantees icq's won't be destroyed and
 	 * makes creating new ones safe.
@@ -1009,14 +1010,14 @@ static struct request *__get_request(struct request_list *rl, int rw_flags,
 	 * it will be created after releasing queue_lock.
 	 */
 	if (blk_rq_should_init_elevator(bio) && !blk_queue_bypass(q)) {
-		rw_flags |= REQ_ELVPRIV;
+		cmd_flags |= REQ_ELVPRIV;
 		q->nr_rqs_elvpriv++;
 		if (et->icq_cache && ioc)
 			icq = ioc_lookup_icq(ioc, q);
 	}
 
 	if (blk_queue_io_stat(q))
-		rw_flags |= REQ_IO_STAT;
+		cmd_flags |= REQ_IO_STAT;
 	spin_unlock_irq(q->queue_lock);
 
 	/* allocate and init request */
@@ -1026,10 +1027,10 @@ static struct request *__get_request(struct request_list *rl, int rw_flags,
 
 	blk_rq_init(q, rq);
 	blk_rq_set_rl(rq, rl);
-	rq->cmd_flags = rw_flags | REQ_ALLOCED;
+	rq->cmd_flags = cmd_flags | REQ_ALLOCED;
 
 	/* init elvpriv */
-	if (rw_flags & REQ_ELVPRIV) {
+	if (cmd_flags & REQ_ELVPRIV) {
 		if (unlikely(et->icq_cache && !icq)) {
 			if (ioc)
 				icq = ioc_create_icq(ioc, q, gfp_mask);
@@ -1159,8 +1160,6 @@ static struct request *blk_old_get_request(struct request_queue *q, int rw,
 		gfp_t gfp_mask)
 {
 	struct request *rq;
-
-	BUG_ON(rw != READ && rw != WRITE);
 
 	/* create ioc upfront */
 	create_io_context(gfp_mask, q->node);
@@ -1333,8 +1332,10 @@ EXPORT_SYMBOL_GPL(part_round_stats);
 #ifdef CONFIG_PM_RUNTIME
 static void blk_pm_put_request(struct request *rq)
 {
-	if (rq->q->dev && !(rq->cmd_flags & REQ_PM) && !--rq->q->nr_pending)
-		pm_runtime_mark_last_busy(rq->q->dev);
+	if (rq->q->dev && !(rq->cmd_flags & REQ_PM) && rq->q->nr_pending) {
+		if (!--rq->q->nr_pending)
+			pm_runtime_mark_last_busy(rq->q->dev);
+	}
 }
 #else
 static inline void blk_pm_put_request(struct request *rq) {}
@@ -1357,8 +1358,8 @@ void __blk_put_request(struct request_queue *q, struct request *req)
 
 	elv_completed_request(q, req);
 
-	/* this is a bio leak */
-	WARN_ON(req->bio != NULL);
+	/* this is a bio leak if the bio is not tagged with BIO_DONTFREE */
+	WARN_ON(req->bio && !bio_flagged(req->bio, BIO_DONTFREE));
 
 	/*
 	 * Request may not have originated from ll_rw_blk. if not,
@@ -1545,6 +1546,7 @@ void init_request_from_bio(struct request *req, struct bio *bio)
 	req->ioprio = bio_prio(bio);
 	blk_rq_bio_prep(req->q, req, bio);
 }
+EXPORT_SYMBOL(init_request_from_bio);
 
 void blk_queue_bio(struct request_queue *q, struct bio *bio)
 {
@@ -1566,7 +1568,8 @@ void blk_queue_bio(struct request_queue *q, struct bio *bio)
 		return;
 	}
 
-	if (bio->bi_rw & (REQ_FLUSH | REQ_FUA)) {
+	if (bio->bi_rw & (REQ_FLUSH | REQ_FUA | REQ_POST_FLUSH_BARRIER |
+			  REQ_BARRIER)) {
 		spin_lock_irq(q->queue_lock);
 		where = ELEVATOR_INSERT_FLUSH;
 		goto get_rq;
@@ -1753,6 +1756,69 @@ static inline int bio_check_eod(struct bio *bio, unsigned int nr_sectors)
 	return 0;
 }
 
+#define UPDATE_TIME (HZ / 2)
+static void blk_update_perf(struct request_queue *q,
+	struct hd_struct *p)
+{
+	unsigned long now = jiffies;
+	unsigned long last = q->bw_timestamp;
+	sector_t read_sect, write_sect, tmp_sect;
+	unsigned long read_ios, write_ios, tmp_ios;
+	unsigned long current_ticks;
+	unsigned long busy_ticks;
+
+	/*lint -save -e550 -e774*/
+	if (time_before(now, last + UPDATE_TIME))
+		return;
+	/*lint -restore*/
+
+	/*lint -save -e50 -e747 -e774 -e1072*/
+	if (cmpxchg(&q->bw_timestamp, last, now) != last)
+		return;
+	/*lint -restore*/
+
+	/*lint -save -e40 -e409 -e530 -e570 -e574 -e713 -e737 -e1058 -e1514*/
+	tmp_sect = part_stat_read(p, sectors[READ]);
+	read_sect = tmp_sect - q->last_sects[READ];
+	q->last_sects[READ] = tmp_sect;
+	tmp_sect = part_stat_read(p, sectors[WRITE]);
+	write_sect = tmp_sect - q->last_sects[WRITE];
+	q->last_sects[WRITE] = tmp_sect;
+
+	tmp_ios = part_stat_read(p, ios[READ]);
+	read_ios = tmp_ios - q->last_ios[READ];
+	q->last_ios[READ] = tmp_ios;
+	tmp_ios = part_stat_read(p, ios[WRITE]);
+	write_ios = tmp_ios - q->last_ios[WRITE];
+	q->last_ios[WRITE] = tmp_ios;
+
+	current_ticks = part_stat_read(p, io_ticks);
+	busy_ticks = current_ticks - q->last_ticks;
+	q->last_ticks = current_ticks;
+	/*lint -restore*/
+
+	/* Don't account for long idle */
+	if (now - last > UPDATE_TIME * 2)
+		return;
+	/* Disk load is too low or driver doesn't account io_ticks */
+	if (busy_ticks == 0)
+		return;
+
+	if (busy_ticks > now - last)
+		busy_ticks = now - last;
+
+	/*lint -save -e712 -e713*/
+	tmp_sect = (read_sect + write_sect) * HZ;
+	sector_div(tmp_sect, busy_ticks);
+	q->disk_bw = tmp_sect;
+	/*lint -restore*/
+
+	tmp_ios = (read_ios + write_ios) * HZ / busy_ticks;
+	q->disk_iops = tmp_ios;
+/*lint -save -e550*/
+}
+/*lint -restore*/
+
 static noinline_for_stack bool
 generic_make_request_checks(struct bio *bio)
 {
@@ -1834,6 +1900,9 @@ generic_make_request_checks(struct bio *bio)
 	 */
 	create_io_context(GFP_ATOMIC, q->node);
 
+	blk_update_perf(q,
+		part->partno ? &part_to_disk(part)->part0 : part);
+
 	if (blk_throtl_bio(q, bio))
 		return false;	/* throttled, will be resubmitted later */
 
@@ -1872,6 +1941,20 @@ end_io:
 void generic_make_request(struct bio *bio)
 {
 	struct bio_list bio_list_on_stack;
+
+#ifdef CONFIG_HW_SYSTEM_WR_PROTECT
+	if (likely(bio_has_data(bio))) {
+		unsigned int count;
+
+		if (unlikely(bio->bi_rw & REQ_WRITE_SAME))
+			count = bdev_logical_block_size(bio->bi_bdev) >> 9;
+		else
+			count = bio_sectors(bio);
+
+		if (unlikely(should_trap_this_bio(bio->bi_rw, bio, count)))
+			return;
+	}
+#endif
 
 	if (!generic_make_request_checks(bio))
 		return;
@@ -1919,6 +2002,27 @@ void generic_make_request(struct bio *bio)
 }
 EXPORT_SYMBOL(generic_make_request);
 
+#ifdef CONFIG_BLK_DEV_IO_TRACE
+static inline struct task_struct *get_dirty_task(struct bio *bio)
+{
+	/*
+	 * Not all the pages in the bio are dirtied by the
+	 * same task but most likely it will be, since the
+	 * sectors accessed on the device must be adjacent.
+	 */
+	if (bio->bi_io_vec && bio->bi_io_vec->bv_page &&
+		bio->bi_io_vec->bv_page->tsk_dirty)
+			return bio->bi_io_vec->bv_page->tsk_dirty;
+	else
+		return current;
+}
+#else
+static inline struct task_struct *get_dirty_task(struct bio *bio)
+{
+	return current;
+}
+#endif
+
 /**
  * submit_bio - submit a bio to the block device layer for I/O
  * @rw: whether to %READ or %WRITE, or maybe to %READA (read ahead)
@@ -1954,8 +2058,11 @@ void submit_bio(int rw, struct bio *bio)
 
 		if (unlikely(block_dump)) {
 			char b[BDEVNAME_SIZE];
+			struct task_struct *tsk;
+
+			tsk = get_dirty_task(bio);
 			printk(KERN_DEBUG "%s(%d): %s block %Lu on %s (%u sectors)\n",
-			current->comm, task_pid_nr(current),
+				tsk->comm, task_pid_nr(tsk),
 				(rw & WRITE) ? "WRITE" : "READ",
 				(unsigned long long)bio->bi_iter.bi_sector,
 				bdevname(bio->bi_bdev, b),
@@ -2459,6 +2566,15 @@ bool blk_update_request(struct request *req, int error, unsigned int nr_bytes)
 	blk_account_io_completion(req, nr_bytes);
 
 	total_bytes = 0;
+
+	/*
+	 * Check for this if flagged, Req based dm needs to perform
+	 * post processing, hence dont end bios or request.DM
+	 * layer takes care.
+	 */
+	if (bio_flagged(req->bio, BIO_DONTFREE))
+		return false;
+
 	while (req->bio) {
 		struct bio *bio = req->bio;
 		unsigned bio_bytes = min(bio->bi_iter.bi_size, nr_bytes);

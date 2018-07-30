@@ -67,8 +67,8 @@
 #include <linux/atomic.h>
 #include <net/dst.h>
 #include <net/checksum.h>
-#include <net/tcp_states.h>
 #include <linux/net_tstamp.h>
+#include <net/tcp_states.h>
 
 struct cgroup;
 struct cgroup_subsys;
@@ -362,6 +362,9 @@ struct sock {
 	struct sk_filter __rcu	*sk_filter;
 	struct socket_wq __rcu	*sk_wq;
 
+#ifdef CONFIG_HW_DPIMARK_MODULE
+	unsigned int    sk_hwdpi_mark;
+#endif
 #ifdef CONFIG_XFRM
 	struct xfrm_policy	*sk_policy[2];
 #endif
@@ -421,6 +424,11 @@ struct sock {
 	int			sk_write_pending;
 #ifdef CONFIG_SECURITY
 	void			*sk_security;
+#endif
+
+#ifdef CONFIG_HW_WIFIPRO
+	int wifipro_is_google_sock;
+	char wifipro_dev_name[IFNAMSIZ];
 #endif
 	__u32			sk_mark;
 	kuid_t			sk_uid;
@@ -2324,5 +2332,16 @@ extern int sysctl_optmem_max;
 
 extern __u32 sysctl_wmem_default;
 extern __u32 sysctl_rmem_default;
+
+/* SOCKEV Notifier Events */
+#define SOCKEV_SOCKET   0x00
+#define SOCKEV_BIND     0x01
+#define SOCKEV_LISTEN   0x02
+#define SOCKEV_ACCEPT   0x03
+#define SOCKEV_CONNECT  0x04
+#define SOCKEV_SHUTDOWN 0x05
+
+int sockev_register_notify(struct notifier_block *nb);
+int sockev_unregister_notify(struct notifier_block *nb);
 
 #endif	/* _SOCK_H */

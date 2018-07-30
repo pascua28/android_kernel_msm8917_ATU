@@ -19,6 +19,9 @@
 #include <linux/ratelimit.h>
 #include <linux/list_lru.h>
 #include "internal.h"
+#ifdef CONFIG_TASK_PROTECT_LRU
+#include <linux/protect_lru.h>
+#endif
 
 /*
  * Inode locking rules:
@@ -128,6 +131,9 @@ int inode_init_always(struct super_block *sb, struct inode *inode)
 	static const struct file_operations empty_fops;
 	struct address_space *const mapping = &inode->i_data;
 
+#ifdef CONFIG_TASK_PROTECT_LRU
+	inode->i_protect = 0;
+#endif
 	inode->i_sb = sb;
 	inode->i_blkbits = sb->s_blocksize_bits;
 	inode->i_flags = 0;
@@ -405,6 +411,10 @@ static void inode_lru_list_add(struct inode *inode)
 {
 	if (list_lru_add(&inode->i_sb->s_inode_lru, &inode->i_lru))
 		this_cpu_inc(nr_unused);
+#ifdef CONFIG_TASK_PROTECT_LRU
+	else if (protect_lru_enable && inode->i_protect != 0)
+		list_lru_move(&inode->i_sb->s_inode_lru, &inode->i_lru);
+#endif
 }
 
 /*

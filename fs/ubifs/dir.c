@@ -148,12 +148,12 @@ struct inode *ubifs_new_inode(struct ubifs_info *c, const struct inode *dir,
 	if (c->highest_inum >= INUM_WARN_WATERMARK) {
 		if (c->highest_inum >= INUM_WATERMARK) {
 			spin_unlock(&c->cnt_lock);
-			ubifs_err("out of inode numbers");
+			ubifs_err(c, "out of inode numbers");
 			make_bad_inode(inode);
 			iput(inode);
 			return ERR_PTR(-EINVAL);
 		}
-		ubifs_warn("running out of inode numbers (current %lu, max %d)",
+		ubifs_warn(c, "running out of inode numbers (current %lu, max %u)",
 			   (unsigned long)c->highest_inum, INUM_WATERMARK);
 	}
 
@@ -224,7 +224,7 @@ static struct dentry *ubifs_lookup(struct inode *dir, struct dentry *dentry,
 		 * checking.
 		 */
 		err = PTR_ERR(inode);
-		ubifs_err("dead directory entry '%pd', error %d",
+		ubifs_err(c, "dead directory entry '%pd', error %d",
 			  dentry, err);
 		ubifs_ro_mode(c, err);
 		goto out;
@@ -272,6 +272,10 @@ static int ubifs_create(struct inode *dir, struct dentry *dentry, umode_t mode,
 		goto out_budg;
 	}
 
+	err = ubifs_init_security(dir, inode, &dentry->d_name);
+	if (err)
+		goto out_inode;
+
 	mutex_lock(&dir_ui->ui_mutex);
 	dir->i_size += sz_change;
 	dir_ui->ui_size = dir->i_size;
@@ -290,11 +294,12 @@ out_cancel:
 	dir->i_size -= sz_change;
 	dir_ui->ui_size = dir->i_size;
 	mutex_unlock(&dir_ui->ui_mutex);
+out_inode:
 	make_bad_inode(inode);
 	iput(inode);
 out_budg:
 	ubifs_release_budget(c, &req);
-	ubifs_err("cannot create regular file, error %d", err);
+	ubifs_err(c, "cannot create regular file, error %d", err);
 	return err;
 }
 
@@ -446,13 +451,14 @@ static int ubifs_readdir(struct file *file, struct dir_context *ctx)
 	}
 
 out:
+	kfree(file->private_data);
+	file->private_data = NULL;
+
 	if (err != -ENOENT) {
-		ubifs_err("cannot find next direntry, error %d", err);
+		ubifs_err(c, "cannot find next direntry, error %d", err);
 		return err;
 	}
 
-	kfree(file->private_data);
-	file->private_data = NULL;
 	/* 2 is a special value indicating that there are no more direntries */
 	ctx->pos = 2;
 	return 0;
@@ -728,6 +734,10 @@ static int ubifs_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
 		goto out_budg;
 	}
 
+	err = ubifs_init_security(dir, inode, &dentry->d_name);
+	if (err)
+		goto out_inode;
+
 	mutex_lock(&dir_ui->ui_mutex);
 	insert_inode_hash(inode);
 	inc_nlink(inode);
@@ -737,7 +747,7 @@ static int ubifs_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
 	dir->i_mtime = dir->i_ctime = inode->i_ctime;
 	err = ubifs_jnl_update(c, dir, &dentry->d_name, inode, 0, 0);
 	if (err) {
-		ubifs_err("cannot create directory, error %d", err);
+		ubifs_err(c, "cannot create directory, error %d", err);
 		goto out_cancel;
 	}
 	mutex_unlock(&dir_ui->ui_mutex);
@@ -751,6 +761,7 @@ out_cancel:
 	dir_ui->ui_size = dir->i_size;
 	drop_nlink(dir);
 	mutex_unlock(&dir_ui->ui_mutex);
+out_inode:
 	make_bad_inode(inode);
 	iput(inode);
 out_budg:
@@ -779,9 +790,6 @@ static int ubifs_mknod(struct inode *dir, struct dentry *dentry,
 
 	dbg_gen("dent '%pd' in dir ino %lu", dentry, dir->i_ino);
 
-	if (!new_valid_dev(rdev))
-		return -EINVAL;
-
 	if (S_ISBLK(mode) || S_ISCHR(mode)) {
 		dev = kmalloc(sizeof(union ubifs_dev_desc), GFP_NOFS);
 		if (!dev)
@@ -808,6 +816,10 @@ static int ubifs_mknod(struct inode *dir, struct dentry *dentry,
 	ui->data = dev;
 	ui->data_len = devlen;
 
+	err = ubifs_init_security(dir, inode, &dentry->d_name);
+	if (err)
+		goto out_inode;
+
 	mutex_lock(&dir_ui->ui_mutex);
 	dir->i_size += sz_change;
 	dir_ui->ui_size = dir->i_size;
@@ -826,6 +838,7 @@ out_cancel:
 	dir->i_size -= sz_change;
 	dir_ui->ui_size = dir->i_size;
 	mutex_unlock(&dir_ui->ui_mutex);
+out_inode:
 	make_bad_inode(inode);
 	iput(inode);
 out_budg:
@@ -883,6 +896,10 @@ static int ubifs_symlink(struct inode *dir, struct dentry *dentry,
 	 */
 	ui->data_len = len;
 	inode->i_size = ubifs_inode(inode)->ui_size = len;
+
+	err = ubifs_init_security(dir, inode, &dentry->d_name);
+	if (err)
+		goto out_inode;
 
 	mutex_lock(&dir_ui->ui_mutex);
 	dir->i_size += sz_change;
@@ -1170,6 +1187,9 @@ const struct inode_operations ubifs_dir_inode_operations = {
 	.getxattr    = ubifs_getxattr,
 	.listxattr   = ubifs_listxattr,
 	.removexattr = ubifs_removexattr,
+#ifdef CONFIG_UBIFS_ATIME_SUPPORT
+	.update_time = ubifs_update_time,
+#endif
 };
 
 const struct file_operations ubifs_dir_operations = {

@@ -183,6 +183,7 @@ int irq_do_set_affinity(struct irq_data *data, const struct cpumask *mask,
 	ret = chip->irq_set_affinity(data, mask, force);
 	switch (ret) {
 	case IRQ_SET_MASK_OK:
+	case IRQ_SET_MASK_OK_DONE:
 		cpumask_copy(data->affinity, mask);
 	case IRQ_SET_MASK_OK_NOCOPY:
 		irq_set_thread_affinity(desc);
@@ -242,6 +243,9 @@ int irq_set_affinity_hint(unsigned int irq, const struct cpumask *m)
 		return -EINVAL;
 	desc->affinity_hint = m;
 	irq_put_desc_unlock(desc, flags);
+	/* set the initial affinity to prevent every interrupt being on CPU0 */
+	if (m)
+		__irq_set_affinity(irq, m, false);
 	return 0;
 }
 EXPORT_SYMBOL_GPL(irq_set_affinity_hint);
@@ -306,6 +310,9 @@ irq_set_affinity_notifier(unsigned int irq, struct irq_affinity_notify *notify)
 	old_notify = desc->affinity_notify;
 	desc->affinity_notify = notify;
 	raw_spin_unlock_irqrestore(&desc->lock, flags);
+
+	if (!notify && old_notify)
+		cancel_work_sync(&old_notify->work);
 
 	if (old_notify)
 		kref_put(&old_notify->kref, old_notify->release);
@@ -547,6 +554,32 @@ int irq_set_irq_wake(unsigned int irq, unsigned int on)
 }
 EXPORT_SYMBOL(irq_set_irq_wake);
 
+/**
+ *     irq_read_line - read the value on an irq line
+ *     @irq: Interrupt number representing a hardware line
+ *
+ *     This function is meant to be called from within the irq handler.
+ *     Slowbus irq controllers might sleep, but it is assumed that the irq
+ *     handler for slowbus interrupts will execute in thread context, so
+ *     sleeping is okay.
+ */
+int irq_read_line(unsigned int irq)
+{
+	struct irq_desc *desc = irq_to_desc(irq);
+	int val;
+
+	if (!desc || !desc->irq_data.chip->irq_read_line)
+		return -EINVAL;
+
+	chip_bus_lock(desc);
+	raw_spin_lock(&desc->lock);
+	val = desc->irq_data.chip->irq_read_line(&desc->irq_data);
+	raw_spin_unlock(&desc->lock);
+	chip_bus_sync_unlock(desc);
+	return val;
+}
+EXPORT_SYMBOL_GPL(irq_read_line);
+
 /*
  * Internal function that tells the architecture code whether a
  * particular irq has been exclusively allocated or is available
@@ -600,6 +633,7 @@ int __irq_set_trigger(struct irq_desc *desc, unsigned int irq,
 
 	switch (ret) {
 	case IRQ_SET_MASK_OK:
+	case IRQ_SET_MASK_OK_DONE:
 		irqd_clear(&desc->irq_data, IRQD_TRIGGER_MASK);
 		irqd_set(&desc->irq_data, flags);
 
@@ -1565,6 +1599,19 @@ int request_any_context_irq(unsigned int irq, irq_handler_t handler,
 	return !ret ? IRQC_IS_HARDIRQ : ret;
 }
 EXPORT_SYMBOL_GPL(request_any_context_irq);
+
+void irq_set_pending(unsigned int irq)
+{
+	struct irq_desc *desc = irq_to_desc(irq);
+	unsigned long flags;
+
+	if (desc) {
+		raw_spin_lock_irqsave(&desc->lock, flags);
+		desc->istate |= IRQS_PENDING;
+		raw_spin_unlock_irqrestore(&desc->lock, flags);
+	}
+}
+EXPORT_SYMBOL_GPL(irq_set_pending);
 
 void enable_percpu_irq(unsigned int irq, unsigned int type)
 {

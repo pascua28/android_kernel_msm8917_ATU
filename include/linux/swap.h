@@ -159,11 +159,13 @@ enum {
 	SWP_AREA_DISCARD = (1 << 8),	/* single-time swap area discards */
 	SWP_PAGE_DISCARD = (1 << 9),	/* freed swap page-cluster discards */
 					/* add others here before... */
-	SWP_SCANNING	= (1 << 10),	/* refcount in scan_swap_map */
+	SWP_FAST	= (1 << 10),	/* blkdev access is fast and cheap */
+	SWP_SCANNING	= (1 << 11),	/* refcount in scan_swap_map */
 };
 
 #define SWAP_CLUSTER_MAX 32UL
 #define COMPACT_CLUSTER_MAX SWAP_CLUSTER_MAX
+#define SWAPFILE_CLUSTER	256
 
 /*
  * Ratio between zone->managed_pages and the "gap" that above the per-zone
@@ -254,6 +256,8 @@ struct swap_info_struct {
 	struct work_struct discard_work; /* discard worker */
 	struct swap_cluster_info discard_cluster_head; /* list head of discard clusters */
 	struct swap_cluster_info discard_cluster_tail; /* list tail of discard clusters */
+	unsigned int write_pending;
+	unsigned int max_writes;
 };
 
 /* linux/mm/workingset.c */
@@ -337,8 +341,22 @@ extern unsigned long mem_cgroup_shrink_node_zone(struct mem_cgroup *mem,
 						unsigned long *nr_scanned);
 extern unsigned long shrink_all_memory(unsigned long nr_pages);
 extern int vm_swappiness;
+extern int sysctl_swap_ratio;
+extern int sysctl_swap_ratio_enable;
 extern int remove_mapping(struct address_space *mapping, struct page *page);
 extern unsigned long vm_total_pages;
+
+#ifdef CONFIG_HUAWEI_RCC
+#define RCC_MODE_ANON   1
+#define RCC_MODE_FILE   2
+int try_to_free_pages_ex(int nr_pages, int mode);
+#endif
+
+#ifdef CONFIG_SHRINK_MEMORY
+extern int sysctl_shrink_memory;
+extern int sysctl_shrinkmem_handler(struct ctl_table *table, int write,
+									void __user *buffer, size_t *length , loff_t *ppos);
+#endif
 
 #ifdef CONFIG_NUMA
 extern int zone_reclaim_mode;
@@ -413,10 +431,18 @@ extern struct page *swapin_readahead(swp_entry_t, gfp_t,
 /* linux/mm/swapfile.c */
 extern atomic_long_t nr_swap_pages;
 extern long total_swap_pages;
+extern bool is_swap_fast(swp_entry_t entry);
 
 /* Swap 50% full? Release swapcache more aggressively.. */
-static inline bool vm_swap_full(void)
+static inline bool vm_swap_full(struct swap_info_struct *si)
 {
+	/*
+	 * If the swap device is fast, return true
+	 * not to delay swap free.
+	 */
+	if (si->flags & SWP_FAST)
+		return true;
+
 	return atomic_long_read(&nr_swap_pages) * 2 < total_swap_pages;
 }
 
@@ -462,7 +488,7 @@ mem_cgroup_uncharge_swapcache(struct page *page, swp_entry_t ent, bool swapout)
 #define get_nr_swap_pages()			0L
 #define total_swap_pages			0L
 #define total_swapcache_pages()			0UL
-#define vm_swap_full()				0
+#define vm_swap_full(si)			0
 
 #define si_swapinfo(val) \
 	do { (val)->freeswap = (val)->totalswap = 0; } while (0)

@@ -4,7 +4,6 @@
  *
  *  Copyright (C) 2005-2008  Marcel Holtmann <marcel@holtmann.org>
  *
- *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
  *  the Free Software Foundation; either version 2 of the License, or
@@ -24,16 +23,20 @@
 #include <linux/module.h>
 #include <linux/usb.h>
 #include <linux/firmware.h>
+#include <linux/suspend.h>
 
 #include <net/bluetooth/bluetooth.h>
 #include <net/bluetooth/hci_core.h>
+
+#include "ath3k.h"
 
 #define VERSION "0.6"
 
 static bool disable_scofix;
 static bool force_scofix;
 
-static bool reset = 1;
+static int sco_conn;
+static int reset = 1;
 
 static struct usb_driver btusb_driver;
 
@@ -203,6 +206,7 @@ static const struct usb_device_id blacklist_table[] = {
 	{ USB_DEVICE(0x0cf3, 0xe004), .driver_info = BTUSB_ATH3012 },
 	{ USB_DEVICE(0x0cf3, 0xe005), .driver_info = BTUSB_ATH3012 },
 	{ USB_DEVICE(0x0cf3, 0xe006), .driver_info = BTUSB_ATH3012 },
+	{ USB_DEVICE(0x0cf3, 0xe500), .driver_info = BTUSB_ATH3012 },
 	{ USB_DEVICE(0x13d3, 0x3362), .driver_info = BTUSB_ATH3012 },
 	{ USB_DEVICE(0x13d3, 0x3375), .driver_info = BTUSB_ATH3012 },
 	{ USB_DEVICE(0x13d3, 0x3393), .driver_info = BTUSB_ATH3012 },
@@ -1134,8 +1138,9 @@ static void btusb_notify(struct hci_dev *hdev, unsigned int evt)
 
 	BT_DBG("%s evt %d", hdev->name, evt);
 
-	if (hci_conn_num(hdev, SCO_LINK) != data->sco_num) {
-		data->sco_num = hci_conn_num(hdev, SCO_LINK);
+	if ((evt == HCI_NOTIFY_SCO_COMPLETE) || (evt == HCI_NOTIFY_CONN_DEL)) {
+		BT_DBG("SCO conn state changed: evt %d", evt);
+		sco_conn = (evt == HCI_NOTIFY_SCO_COMPLETE) ? 1 : 0;
 		schedule_work(&data->work);
 	}
 }
@@ -1190,7 +1195,7 @@ static void btusb_work(struct work_struct *work)
 	int new_alts;
 	int err;
 
-	if (data->sco_num > 0) {
+	if (sco_conn) {
 		if (!test_bit(BTUSB_DID_ISO_RESUME, &data->flags)) {
 			err = usb_autopm_get_interface(data->isoc ? data->isoc : data->intf);
 			if (err < 0) {
@@ -1976,6 +1981,7 @@ static int btusb_probe(struct usb_interface *intf,
 	struct btusb_data *data;
 	struct hci_dev *hdev;
 	int i, err;
+	struct ath3k_version version;
 
 	BT_DBG("intf %p id %p", intf, id);
 
@@ -1996,11 +2002,22 @@ static int btusb_probe(struct usb_interface *intf,
 
 	if (id->driver_info & BTUSB_ATH3012) {
 		struct usb_device *udev = interface_to_usbdev(intf);
-
 		/* Old firmware would otherwise let ath3k driver load
 		 * patch and sysconfig files */
-		if (le16_to_cpu(udev->descriptor.bcdDevice) <= 0x0001)
+		err = get_rome_version(udev, &version);
+		if (err < 0) {
+			if (le16_to_cpu(udev->descriptor.bcdDevice) <= 0x0001)
+				BT_INFO("FW for ar3k is yet to be downloaded");
+			else
+				BT_ERR("Failed to get ROME USB version");
 			return -ENODEV;
+		}
+		BT_INFO("Rome Version: 0x%x", version.rom_version);
+		err = rome_download(udev, &version);
+		if (err < 0) {
+			BT_ERR("Failed to download ROME firmware");
+			return -ENODEV;
+		}
 	}
 
 	data = devm_kzalloc(&intf->dev, sizeof(*data), GFP_KERNEL);
@@ -2149,6 +2166,7 @@ static int btusb_probe(struct usb_interface *intf,
 	}
 
 	usb_set_intfdata(intf, data);
+	usb_enable_autosuspend(data->udev);
 
 	return 0;
 }
@@ -2163,7 +2181,16 @@ static void btusb_disconnect(struct usb_interface *intf)
 	if (!data)
 		return;
 
+	/* clear flags so that no more URBs can be submitted */
 	hdev = data->hdev;
+	clear_bit(HCI_RUNNING, &hdev->flags);
+
+	/* kill all the anchored urbs on USB disconnect */
+	usb_kill_anchored_urbs(&data->intr_anchor);
+	usb_kill_anchored_urbs(&data->bulk_anchor);
+	usb_kill_anchored_urbs(&data->isoc_anchor);
+	usb_kill_anchored_urbs(&data->tx_anchor);
+
 	usb_set_intfdata(data->intf, NULL);
 
 	if (data->isoc)
@@ -2214,13 +2241,14 @@ static void play_deferred(struct btusb_data *data)
 	int err;
 
 	while ((urb = usb_get_from_anchor(&data->deferred))) {
+		usb_unanchor_urb(urb);
+		usb_anchor_urb(urb, &data->tx_anchor);
 		err = usb_submit_urb(urb, GFP_ATOMIC);
 		if (err < 0)
 			break;
 
 		data->tx_in_flight++;
 	}
-	usb_scuttle_anchored_urbs(&data->deferred);
 }
 
 static int btusb_resume(struct usb_interface *intf)
@@ -2281,6 +2309,29 @@ done:
 }
 #endif
 
+static unsigned long btusb_pm_flags;
+#define BTUSB_PM_SUSPEND	(1)
+static int btusb_pm_notify(struct notifier_block *b,
+				unsigned long event, void *p)
+{
+	switch (event) {
+	case PM_SUSPEND_PREPARE:
+		set_bit(BTUSB_PM_SUSPEND, &btusb_pm_flags);
+		down_write(&btusb_pm_sem);
+		break;
+	case PM_POST_SUSPEND:
+		up_write(&btusb_pm_sem);
+		clear_bit(BTUSB_PM_SUSPEND, &btusb_pm_flags);
+		break;
+	}
+
+	return NOTIFY_DONE;
+}
+
+static struct notifier_block btusb_pm_notifier = {
+	.notifier_call = btusb_pm_notify,
+};
+
 static struct usb_driver btusb_driver = {
 	.name		= "btusb",
 	.probe		= btusb_probe,
@@ -2294,7 +2345,31 @@ static struct usb_driver btusb_driver = {
 	.disable_hub_initiated_lpm = 1,
 };
 
-module_usb_driver(btusb_driver);
+static int __init btusb_driver_init(void)
+{
+	int ret = 0;
+
+	ret = usb_register(&btusb_driver);
+	/* ignore return value */
+	register_pm_notifier(&btusb_pm_notifier);
+	return ret;
+}
+module_init(btusb_driver_init);
+
+static void __exit btusb_driver_exit(void)
+{
+	unregister_pm_notifier(&btusb_pm_notifier);
+	/*
+	 * If unregister gets called before resume notification, we need to
+	 * release the semaphore to avoid deadlock.
+	 */
+	if (test_bit(BTUSB_PM_SUSPEND, &btusb_pm_flags)) {
+		up_write(&btusb_pm_sem);
+		clear_bit(BTUSB_PM_SUSPEND, &btusb_pm_flags);
+	}
+	usb_deregister(&btusb_driver);
+}
+module_exit(btusb_driver_exit);
 
 module_param(disable_scofix, bool, 0644);
 MODULE_PARM_DESC(disable_scofix, "Disable fixup of wrong SCO buffer size");

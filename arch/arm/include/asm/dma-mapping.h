@@ -121,12 +121,14 @@ static inline unsigned long dma_max_pfn(struct device *dev)
 }
 #define dma_max_pfn(dev) dma_max_pfn(dev)
 
-static inline int set_arch_dma_coherent_ops(struct device *dev)
+static inline void arch_setup_dma_ops(struct device *dev, u64 dma_base,
+				      u64 size, struct iommu_ops *iommu,
+				      bool coherent)
 {
-	set_dma_ops(dev, &arm_coherent_dma_ops);
-	return 0;
+	if (coherent)
+		set_dma_ops(dev, &arm_coherent_dma_ops);
 }
-#define set_arch_dma_coherent_ops(dev)	set_arch_dma_coherent_ops(dev)
+#define arch_setup_dma_ops arch_setup_dma_ops
 
 static inline dma_addr_t phys_to_dma(struct device *dev, phys_addr_t paddr)
 {
@@ -264,6 +266,56 @@ static inline void dma_free_attrs(struct device *dev, size_t size,
 extern int arm_dma_mmap(struct device *dev, struct vm_area_struct *vma,
 			void *cpu_addr, dma_addr_t dma_addr, size_t size,
 			struct dma_attrs *attrs);
+
+static inline void *dma_alloc_stronglyordered(struct device *dev, size_t size,
+				       dma_addr_t *dma_handle, gfp_t flag)
+{
+	DEFINE_DMA_ATTRS(attrs);
+	dma_set_attr(DMA_ATTR_STRONGLY_ORDERED, &attrs);
+	return dma_alloc_attrs(dev, size, dma_handle, flag, &attrs);
+}
+
+static inline void dma_free_stronglyordered(struct device *dev, size_t size,
+				     void *cpu_addr, dma_addr_t dma_handle)
+{
+	DEFINE_DMA_ATTRS(attrs);
+	dma_set_attr(DMA_ATTR_STRONGLY_ORDERED, &attrs);
+	return dma_free_attrs(dev, size, cpu_addr, dma_handle, &attrs);
+}
+
+static inline int dma_mmap_stronglyordered(struct device *dev,
+		struct vm_area_struct *vma, void *cpu_addr,
+		dma_addr_t dma_addr, size_t size)
+{
+	DEFINE_DMA_ATTRS(attrs);
+	dma_set_attr(DMA_ATTR_STRONGLY_ORDERED, &attrs);
+	return dma_mmap_attrs(dev, vma, cpu_addr, dma_addr, size, &attrs);
+}
+
+static inline void *dma_alloc_nonconsistent(struct device *dev, size_t size,
+				       dma_addr_t *dma_handle, gfp_t flag)
+{
+	DEFINE_DMA_ATTRS(attrs);
+	dma_set_attr(DMA_ATTR_NON_CONSISTENT, &attrs);
+	return dma_alloc_attrs(dev, size, dma_handle, flag, &attrs);
+}
+
+static inline void dma_free_nonconsistent(struct device *dev, size_t size,
+				     void *cpu_addr, dma_addr_t dma_handle)
+{
+	DEFINE_DMA_ATTRS(attrs);
+	dma_set_attr(DMA_ATTR_NON_CONSISTENT, &attrs);
+	return dma_free_attrs(dev, size, cpu_addr, dma_handle, &attrs);
+}
+
+static inline int dma_mmap_nonconsistent(struct device *dev,
+		struct vm_area_struct *vma, void *cpu_addr,
+		dma_addr_t dma_addr, size_t size)
+{
+	DEFINE_DMA_ATTRS(attrs);
+	dma_set_attr(DMA_ATTR_NON_CONSISTENT, &attrs);
+	return dma_mmap_attrs(dev, vma, cpu_addr, dma_addr, size, &attrs);
+}
 
 /*
  * This can be called during early boot to increase the size of the atomic

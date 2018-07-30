@@ -28,7 +28,21 @@
 #define CFQ_WEIGHT_MAX		1000
 #define CFQ_WEIGHT_DEFAULT	500
 
+/* Block Throttle Weight specific */
+#define BLKIO_WEIGHT_MIN	10
+#define BLKIO_WEIGHT_MAX	1000
+#define BLKIO_WEIGHT_DEFAULT	500
+
 #ifdef CONFIG_BLK_CGROUP
+
+enum blk_throtl_type {
+    BLK_THROTL_TA,
+    BLK_THROTL_FG,
+    BLK_THROTL_KBG,
+    BLK_THROTL_SBG,
+    BLK_THROTL_BG,
+    BLK_THROTL_TYPE_NR,
+};
 
 enum blkg_rwstat_type {
 	BLKG_RWSTAT_READ,
@@ -50,9 +64,14 @@ struct blkcg {
 	struct blkcg_gq			*blkg_hint;
 	struct hlist_head		blkg_list;
 
+	unsigned int			weight;
 	/* TODO: per-policy storage in blkcg */
 	unsigned int			cfq_weight;	/* belongs to cfq */
 	unsigned int			cfq_leaf_weight;
+#ifdef CONFIG_BLK_DEV_THROTTLING
+	int				max_inflights;
+	unsigned int            type;
+#endif
 };
 
 struct blkg_stat {
@@ -104,12 +123,18 @@ struct blkcg_gq {
 	/* reference count */
 	atomic_t			refcnt;
 
+	atomic_t			writers;
+
 	/* is this blkg online? protected by both blkcg and q locks */
 	bool				online;
+
+	unsigned int			weight;
 
 	struct blkg_policy_data		*pd[BLKCG_MAX_POLS];
 
 	struct rcu_head			rcu_head;
+
+	struct percpu_counter		nr_dirtied;
 };
 
 typedef void (blkcg_pol_init_pd_fn)(struct blkcg_gq *blkg);
@@ -150,6 +175,7 @@ int blkcg_activate_policy(struct request_queue *q,
 void blkcg_deactivate_policy(struct request_queue *q,
 			     const struct blkcg_policy *pol);
 
+const char *blkg_dev_name(struct blkcg_gq *blkg);
 void blkcg_print_blkgs(struct seq_file *sf, struct blkcg *blkcg,
 		       u64 (*prfill)(struct seq_file *,
 				     struct blkg_policy_data *, int),
@@ -556,6 +582,121 @@ static inline void blkg_rwstat_merge(struct blkg_rwstat *to,
 	u64_stats_update_end(&to->syncp);
 }
 
+#ifdef CONFIG_BLK_DEV_THROTTLING
+struct throtl_io_limit {
+	atomic_t		inflights;
+	wait_queue_head_t	waitq;
+};
+
+struct blk_throtl_io_limit {
+	int			max_inflights;
+	atomic_t		refs;
+	struct throtl_io_limit	io_limits[2];
+};
+
+static inline void blk_throtl_io_limit_init(struct blk_throtl_io_limit *limit)
+{
+	struct throtl_io_limit *lmt;
+	int i;
+
+	limit->max_inflights = 0;
+	atomic_set(&limit->refs, 1);
+
+	for (i = 0; i < 2; i++) {
+		lmt = &limit->io_limits[i];
+		atomic_set(&lmt->inflights, 0);
+		init_waitqueue_head(&lmt->waitq);
+	}
+}
+
+static inline void blk_throtl_io_limit_get(struct blk_throtl_io_limit *io_limit)
+{
+	atomic_inc(&io_limit->refs);
+}
+
+static inline void blk_throtl_io_limit_put(struct blk_throtl_io_limit *io_limit)
+{
+	if (atomic_dec_and_test(&io_limit->refs))
+		kfree(io_limit);
+}
+
+void blk_throtl_update_limit(struct blk_throtl_io_limit *io_limit,
+			     int limit);
+
+static inline struct blkcg_gq *task_blkcg_gq(struct task_struct *tsk,
+					     struct block_device *bdev)
+{
+	struct request_queue *q;
+	struct blkcg *blkcg;
+	struct blkcg_gq *blkg;
+
+	if (!bdev)
+		return NULL;
+
+	q = bdev_get_queue(bdev);
+
+	WARN_ON_ONCE(!rcu_read_lock_held());
+	blkcg = task_blkcg(tsk);
+
+	blkg = blkg_lookup(blkcg, q);
+
+	return blkg;
+}
+
+static inline struct blkcg_gq *task_blkg_get(struct task_struct *tsk,
+					     struct block_device *bdev)
+{
+	struct blkcg_gq *blkg;
+
+	rcu_read_lock();
+	blkg = task_blkcg_gq(tsk, bdev);
+	if (blkg)
+		blkg_get(blkg);
+	else
+		blkg = NULL;
+	rcu_read_unlock();
+
+	return blkg;
+}
+
+static inline void task_blkg_put(struct blkcg_gq *blkg)
+{
+	if (blkg)
+		blkg_put(blkg);
+}
+
+static inline void task_blkg_inc_writer(struct blkcg_gq *blkg)
+{
+	if (blkg)
+		atomic_inc(&blkg->writers);
+}
+
+static inline void task_blkg_dec_writer(struct blkcg_gq *blkg)
+{
+	if (blkg)
+		atomic_dec(&blkg->writers);
+}
+
+extern int blk_throtl_weight_offon;
+
+static inline unsigned int blkcg_weight(struct blkcg_gq *blkg)
+{
+	unsigned int weight;
+
+	if (blkg && blkg->blkcg != &blkcg_root &&
+	    blk_throtl_weight_offon) {
+		weight = ACCESS_ONCE(blkg->weight);
+		weight = max_t(unsigned int,
+			       weight / atomic_read(&blkg->writers),
+			       BLKIO_WEIGHT_MIN);
+	} else {
+		weight = BLKIO_WEIGHT_DEFAULT;
+	}
+
+	return weight;
+}
+#endif	/* CONFIG_BLK_DEV_THROTTLING */
+
 #else	/* CONFIG_BLK_CGROUP */
 
 struct cgroup;
@@ -599,5 +740,27 @@ static inline struct request_list *blk_rq_rl(struct request *rq) { return &rq->q
 #define blk_queue_for_each_rl(rl, q)	\
 	for ((rl) = &(q)->root_rl; (rl); (rl) = NULL)
 
+#ifndef CONFIG_BLK_DEV_THROTTLING
+static inline struct blkcg_gq *task_blkcg_gq(struct task_struct *tsk,
+					     struct block_device *bdev)
+{
+	return NULL;
+}
+
+static inline struct blkcg_gq *task_blkg_get(struct task_struct *tsk,
+					     struct block_device *bdev)
+{
+	return NULL;
+}
+
+static inline void task_blkg_put(struct blkcg_gq *blkg) { }
+static inline void task_blkg_inc_writer(struct blkcg_gq *blkg) { }
+static inline void task_blkg_dec_writer(struct blkcg_gq *blkg) { }
+
+static inline unsigned int blkcg_weight(struct blkcg_gq *blkg)
+{
+	return BLKIO_WEIGHT_DEFAULT;
+}
+#endif	/* CONFIG_BLK_DEV_THROTTLING */
 #endif	/* CONFIG_BLK_CGROUP */
 #endif	/* _BLK_CGROUP_H */

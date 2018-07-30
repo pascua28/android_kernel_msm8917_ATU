@@ -67,4 +67,14 @@ extern const struct cpu_operations *cpu_ops[NR_CPUS];
 int __init cpu_read_ops(struct device_node *dn, int cpu);
 void __init cpu_read_bootcpu_ops(void);
 
+struct of_cpu_method {
+	const char *method;
+	struct cpu_operations *ops;
+};
+
+#define CPU_METHOD_OF_DECLARE(name, _method, _ops)			\
+	static const struct of_cpu_method __cpu_method_of_table_##name	\
+		__used __section(__cpu_method_of_table)			\
+		= { .method = _method, .ops = _ops }
+
 #endif /* ifndef __ASM_CPU_OPS_H */

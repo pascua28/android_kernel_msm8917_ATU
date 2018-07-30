@@ -15,8 +15,6 @@ CPPFLAGS_vmlinux.lds = -DTEXT_OFFSET=$(TEXT_OFFSET)
 OBJCOPYFLAGS	:=-O binary -R .note -R .note.gnu.build-id -R .comment -S
 GZFLAGS		:=-9
 
-LIBGCC 		:= $(shell $(CC) $(KBUILD_CFLAGS) -print-libgcc-file-name)
-
 KBUILD_DEFCONFIG := defconfig
 
 KBUILD_CFLAGS	+= -mgeneral-regs-only
@@ -49,6 +47,13 @@ else
 TEXT_OFFSET := 0x00080000
 endif
 
+# KASAN_SHADOW_OFFSET = VA_START + (1 << (VA_BITS - 3)) - (1 << 61)
+# in 32-bit arithmetic
+KASAN_SHADOW_OFFSET := $(shell printf "0x%08x00000000\n" $$(( \
+			(0xffffffff & (-1 << ($(CONFIG_ARM64_VA_BITS) - 32))) \
+			+ (1 << ($(CONFIG_ARM64_VA_BITS) - 32 - 3)) \
+			- (1 << (64 - 32 - 3)) )) )
+
 export	TEXT_OFFSET GZFLAGS
 
 core-y		+= arch/arm64/kernel/ arch/arm64/mm/
@@ -57,14 +62,16 @@ core-$(CONFIG_KVM) += arch/arm64/kvm/
 core-$(CONFIG_XEN) += arch/arm64/xen/
 core-$(CONFIG_CRYPTO) += arch/arm64/crypto/
 libs-y		:= arch/arm64/lib/ $(libs-y)
-libs-y		+= $(LIBGCC)
 libs-$(CONFIG_EFI_STUB) += drivers/firmware/efi/libstub/
 
-# Default target when executing plain make
-ifeq ($(CONFIG_BUILD_ARM64_APPENDED_DTB_IMAGE),y)
-KBUILD_IMAGE	:= Image.gz-dtb
+ifeq ($(CONFIG_BUILD_ARM64_KERNEL_COMPRESSION_GZIP),y)
+KBUILD_IMAGE   := Image.gz
 else
-KBUILD_IMAGE	:= Image.gz
+KBUILD_IMAGE   := Image
+endif
+
+ifeq ($(CONFIG_BUILD_ARM64_APPENDED_DTB_IMAGE),y)
+KBUILD_IMAGE   := $(addsuffix -dtb,$(KBUILD_IMAGE))
 endif
 
 KBUILD_DTBS	:= dtbs
@@ -82,8 +89,13 @@ zinstall install: vmlinux
 %.dtb: scripts
 	$(Q)$(MAKE) $(build)=$(boot)/dts $(boot)/dts/$@
 
-dtbs: scripts
-	$(Q)$(MAKE) $(build)=$(boot)/dts dtbs
+PHONY += dtbs dtbs_install
+
+dtbs: prepare scripts
+	$(Q)$(MAKE) $(build)=$(boot)/dts
+
+dtbs_install:
+	$(Q)$(MAKE) $(dtbinst)=$(boot)/dts
 
 Image-dtb Image.gz-dtb: vmlinux scripts dtbs
 	$(Q)$(MAKE) $(build)=$(boot) $(boot)/$@
@@ -95,6 +107,17 @@ vdso_install:
 # We use MRPROPER_FILES and CLEAN_FILES now
 archclean:
 	$(Q)$(MAKE) $(clean)=$(boot)
+	$(Q)$(MAKE) $(clean)=$(boot)/dts
+
+# We need to generate vdso-offsets.h before compiling certain files in kernel/.
+# In order to do that, we should use the archprepare target, but we can't since
+# asm-offsets.h is included in some files used to generate vdso-offsets.h, and
+# asm-offsets.h is built in prepare0, for which archprepare is a dependency.
+# Therefore we need to generate the header after prepare0 has been made, hence
+# this hack.
+prepare: vdso_prepare
+vdso_prepare: prepare0
+	$(Q)$(MAKE) $(build)=arch/arm64/kernel/vdso include/generated/vdso-offsets.h
 
 # We need to generate vdso-offsets.h before compiling certain files in kernel/.
 # In order to do that, we should use the archprepare target, but we can't since
@@ -110,6 +133,7 @@ define archhelp
   echo  '* Image.gz      - Compressed kernel image (arch/$(ARCH)/boot/Image.gz)'
   echo  '  Image         - Uncompressed kernel image (arch/$(ARCH)/boot/Image)'
   echo  '* dtbs          - Build device tree blobs for enabled boards'
+  echo  '  dtbs_install  - Install dtbs to $(INSTALL_DTBS_PATH)'
   echo  '  install       - Install uncompressed kernel'
   echo  '  zinstall      - Install compressed kernel'
   echo  '                  Install using (your) ~/bin/installkernel or'

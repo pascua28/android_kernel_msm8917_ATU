@@ -50,12 +50,27 @@ config MMC_BLOCK_BOUNCE
 
 	  If unsure, say Y here.
 
+config MMC_BLOCK_DEFERRED_RESUME
+	bool "Deferr MMC layer resume until I/O is requested"
+	depends on MMC_BLOCK
+	default n
+	help
+	  Say Y here to enable deferred MMC resume until I/O
+	  is requested. This will reduce overall resume latency and
+	  save power when theres an SD card inserted but not being used.
+
 config SDIO_UART
 	tristate "SDIO UART/GPS class support"
 	depends on TTY
 	help
 	  SDIO function driver for SDIO cards that implements the UART
 	  class, as well as the GPS class which appears like a UART.
+
+config HW_SD_HEALTH_DETECT
+	bool "SD HEALTH DIAG SUPPORT"
+	default y
+	help
+	  This is an option to diag sd health status.
 
 config MMC_TEST
 	tristate "MMC host test driver"
@@ -69,14 +84,35 @@ config MMC_TEST
 	  This driver is only of interest to those developing or
 	  testing a host driver. Most people should say N here.
 
-config MMC_SIMULATE_MAX_SPEED
-	bool "Turn on maximum speed control per block device"
-	depends on MMC_BLOCK
+config MMC_BLOCK_TEST
+	tristate "MMC block test"
+	depends on MMC_BLOCK && IOSCHED_TEST
+	default m
 	help
-	  Say Y here to enable MMC device speed limiting. Used to test and
-	  simulate the behavior of the system when confronted with a slow MMC.
+	  MMC block test can be used with test iosched to test the MMC block
+	  device.
+	  Currently used to test eMMC 4.5 features (packed commands, sanitize,
+	  BKOPs).
+	  
+config HW_MMC_TEST
+	bool "MMC host test driver by Huawei"
+	depends on  HUAWEI_KERNEL
+	default n
+	help
+	  it's used as a pre-compile macro for mmc test driver by huawei.
 
-	  Enables max_read_speed, max_write_speed and cache_size attributes to
-	  control the write or read maximum KB/second speed behaviors.
+config HW_EMMC_PROTECT_MODULE
+	tristate "EMMC write protect driver by Huawei"
+	depends on HW_SYSTEM_WR_PROTECT && HUAWEI_KERNEL
+	default y
+	help
+	  This is for EMMC to write protect
 
-	  If unsure, say N here.
+config MMC_FFU
+	bool "FFU SUPPORT"
+	depends on MMC != n
+	default n
+	help
+	  This is an option to run firmware update on eMMC 5.0.
+	  Field firmware updates (FFU) enables features enhancment
+	  in the field.

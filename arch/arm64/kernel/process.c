@@ -51,7 +51,9 @@
 #include <asm/mmu_context.h>
 #include <asm/processor.h>
 #include <asm/stacktrace.h>
-
+#ifdef CONFIG_FASTBOOT_DUMP
+#include <linux/fastboot_dump_reason_api.h>
+#endif
 #ifdef CONFIG_CC_STACKPROTECTOR
 #include <linux/stackprotector.h>
 unsigned long __stack_chk_guard __read_mostly;
@@ -77,6 +79,16 @@ void arch_cpu_idle(void)
 	 */
 	cpu_do_idle();
 	local_irq_enable();
+}
+
+void arch_cpu_idle_enter(void)
+{
+	idle_notifier_call_chain(IDLE_START);
+}
+
+void arch_cpu_idle_exit(void)
+{
+	idle_notifier_call_chain(IDLE_END);
 }
 
 #ifdef CONFIG_HOTPLUG_CPU
@@ -203,18 +215,12 @@ static void show_data(unsigned long addr, int nbytes, const char *name)
 static void show_extra_register_data(struct pt_regs *regs, int nbytes)
 {
 	mm_segment_t fs;
-	unsigned int i;
 
 	fs = get_fs();
 	set_fs(KERNEL_DS);
 	show_data(regs->pc - nbytes, nbytes * 2, "PC");
 	show_data(regs->regs[30] - nbytes, nbytes * 2, "LR");
 	show_data(regs->sp - nbytes, nbytes * 2, "SP");
-	for (i = 0; i < 30; i++) {
-		char name[4];
-		snprintf(name, sizeof(name), "X%u", i);
-		show_data(regs->regs[i] - nbytes, nbytes * 2, name);
-	}
 	set_fs(fs);
 }
 
@@ -235,6 +241,9 @@ void __show_regs(struct pt_regs *regs)
 
 	show_regs_print_info(KERN_DEFAULT);
 	print_symbol("PC is at %s\n", instruction_pointer(regs));
+#ifdef CONFIG_FASTBOOT_DUMP
+	fastboot_dump_reset_reason_info_regs_kallsyms_set("PC is at %s",instruction_pointer(regs));
+#endif
 	print_symbol("LR is at %s\n", lr);
 	printk("pc : [<%016llx>] lr : [<%016llx>] pstate: %08llx\n",
 	       regs->pc, lr, regs->pstate);
@@ -245,7 +254,7 @@ void __show_regs(struct pt_regs *regs)
 			printk("\n");
 	}
 	if (!user_mode(regs))
-		show_extra_register_data(regs, 128);
+		show_extra_register_data(regs, 64);
 	printk("\n");
 }
 

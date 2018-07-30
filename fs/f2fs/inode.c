@@ -16,7 +16,6 @@
 
 #include "f2fs.h"
 #include "node.h"
-#include "segment.h"
 
 #include <trace/events/f2fs.h>
 
@@ -130,7 +129,7 @@ static int do_read_inode(struct inode *inode)
 	i_gid_write(inode, le32_to_cpu(ri->i_gid));
 	set_nlink(inode, le32_to_cpu(ri->i_links));
 	inode->i_size = le64_to_cpu(ri->i_size);
-	inode->i_blocks = SECTOR_FROM_BLOCK(le64_to_cpu(ri->i_blocks) - 1);
+	inode->i_blocks = le64_to_cpu(ri->i_blocks);
 
 	inode->i_atime.tv_sec = le64_to_cpu(ri->i_atime);
 	inode->i_ctime.tv_sec = le64_to_cpu(ri->i_ctime);
@@ -251,14 +250,16 @@ retry:
 	return inode;
 }
 
-int update_inode(struct inode *inode, struct page *node_page)
+void update_inode(struct inode *inode, struct page *node_page)
 {
 	struct f2fs_inode *ri;
 	struct extent_tree *et = F2FS_I(inode)->extent_tree;
 
-	f2fs_inode_synced(inode);
-
 	f2fs_wait_on_page_writeback(node_page, NODE, true);
+
+	set_page_dirty(node_page);
+
+	f2fs_inode_synced(inode);
 
 	ri = F2FS_INODE(node_page);
 
@@ -268,7 +269,7 @@ int update_inode(struct inode *inode, struct page *node_page)
 	ri->i_gid = cpu_to_le32(i_gid_read(inode));
 	ri->i_links = cpu_to_le32(inode->i_nlink);
 	ri->i_size = cpu_to_le64(i_size_read(inode));
-	ri->i_blocks = cpu_to_le64(SECTOR_TO_BLOCK(inode->i_blocks) + 1);
+	ri->i_blocks = cpu_to_le64(inode->i_blocks);
 
 	if (et) {
 		read_lock(&et->lock);
@@ -298,15 +299,12 @@ int update_inode(struct inode *inode, struct page *node_page)
 	/* deleted inode */
 	if (inode->i_nlink == 0)
 		clear_inline_node(node_page);
-
-	return set_page_dirty(node_page);
 }
 
-int update_inode_page(struct inode *inode)
+void update_inode_page(struct inode *inode)
 {
 	struct f2fs_sb_info *sbi = F2FS_I_SB(inode);
 	struct page *node_page;
-	int ret = 0;
 retry:
 	node_page = get_node_page(sbi, inode->i_ino);
 	if (IS_ERR(node_page)) {
@@ -316,12 +314,14 @@ retry:
 			goto retry;
 		} else if (err != -ENOENT) {
 			f2fs_stop_checkpoint(sbi, false);
+			printk(KERN_CRIT "f2fs reboot for memory read error! erro_num = %d\n", err);
+			WARN_ON(1);
+			kernel_restart("mountfail");
 		}
-		return 0;
+		return;
 	}
-	ret = update_inode(inode, node_page);
+	update_inode(inode, node_page);
 	f2fs_put_page(node_page, 1);
-	return ret;
 }
 
 int f2fs_write_inode(struct inode *inode, struct writeback_control *wbc)
@@ -373,8 +373,6 @@ void f2fs_evict_inode(struct inode *inode)
 	if (inode->i_nlink || is_bad_inode(inode))
 		goto no_delete;
 
-	dquot_initialize(inode);
-
 	remove_ino_entry(sbi, inode->i_ino, APPEND_INO);
 	remove_ino_entry(sbi, inode->i_ino, UPDATE_INO);
 
@@ -407,14 +405,31 @@ retry:
 
 	if (err)
 		update_inode_page(inode);
-	dquot_free_inode(inode);
+
+	if (unlikely(is_inode_flag_set(inode, FI_DIRTY_INODE))) {
+		f2fs_inode_synced(inode);
+		f2fs_msg(sbi->sb, KERN_WARNING, "correct inode status to avoid "
+			"endless loop, since inode writeback flow is broken");
+		f2fs_bug_on(sbi, 1);
+	}
 	sb_end_intwrite(inode->i_sb);
 no_delete:
-	dquot_drop(inode);
-
 	stat_dec_inline_xattr(inode);
 	stat_dec_inline_dir(inode);
 	stat_dec_inline_inode(inode);
+
+	if (unlikely(is_inode_flag_set(inode, FI_DIRTY_INODE))) {
+		sb_start_intwrite(inode->i_sb);
+		update_inode_page(inode);
+		if (is_inode_flag_set(inode, FI_DIRTY_INODE)) {
+			f2fs_inode_synced(inode);
+			f2fs_msg(sbi->sb, KERN_WARNING,
+					"inode info is inconsistent since "
+					"inode evicts before we writeback it");
+		}
+		sb_end_intwrite(inode->i_sb);
+		f2fs_bug_on(sbi, 1);
+	}
 
 	/* ino == 0, if f2fs_new_inode() was failed t*/
 	if (inode->i_ino)

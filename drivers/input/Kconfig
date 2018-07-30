@@ -182,13 +182,10 @@ config INPUT_KEYRESET
 	  Say Y here if you want to reboot when some keys are pressed;
 
 config INPUT_KEYCOMBO
-	tristate "Key combo"
+	bool "Key combo"
 	depends on INPUT
 	---help---
 	  Say Y here if you want to take action when some keys are pressed;
-
-	  To compile this driver as a module, choose M here: the
-	  module will be called keycombo.
 
 comment "Input Device Drivers"
 
@@ -211,6 +208,8 @@ menu "Hardware I/O ports"
 source "drivers/input/serio/Kconfig"
 
 source "drivers/input/gameport/Kconfig"
+
+source "drivers/input/fingerprint/Kconfig"
 
 endmenu
 

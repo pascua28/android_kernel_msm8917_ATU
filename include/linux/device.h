@@ -195,12 +195,41 @@ extern struct kset *bus_get_kset(struct bus_type *bus);
 extern struct klist *bus_get_device_klist(struct bus_type *bus);
 
 /**
+ * enum probe_type - device driver probe type to try
+ *	Device drivers may opt in for special handling of their
+ *	respective probe routines. This tells the core what to
+ *	expect and prefer.
+ *
+ * @PROBE_DEFAULT_STRATEGY: Used by drivers that work equally well
+ *	whether probed synchronously or asynchronously.
+ * @PROBE_PREFER_ASYNCHRONOUS: Drivers for "slow" devices which
+ *	probing order is not essential for booting the system may
+ *	opt into executing their probes asynchronously.
+ * @PROBE_FORCE_SYNCHRONOUS: Use this to annotate drivers that need
+ *	their probe routines to run synchronously with driver and
+ *	device registration (with the exception of -EPROBE_DEFER
+ *	handling - re-probing always ends up being done asynchronously).
+ *
+ * Note that the end goal is to switch the kernel to use asynchronous
+ * probing by default, so annotating drivers with
+ * %PROBE_PREFER_ASYNCHRONOUS is a temporary measure that allows us
+ * to speed up boot process while we are validating the rest of the
+ * drivers.
+ */
+enum probe_type {
+	PROBE_DEFAULT_STRATEGY,
+	PROBE_PREFER_ASYNCHRONOUS,
+	PROBE_FORCE_SYNCHRONOUS,
+};
+
+/**
  * struct device_driver - The basic device driver structure
  * @name:	Name of the device driver.
  * @bus:	The bus which the device of this driver belongs to.
  * @owner:	The module owner.
  * @mod_name:	Used for built-in modules.
  * @suppress_bind_attrs: Disables bind/unbind via sysfs.
+ * @probe_type:	Type of the probe (synchronous or asynchronous) to use.
  * @of_match_table: The open firmware table.
  * @acpi_match_table: The ACPI match table.
  * @probe:	Called to query the existence of a specific device,
@@ -234,6 +263,7 @@ struct device_driver {
 	const char		*mod_name;	/* used for built-in modules */
 
 	bool suppress_bind_attrs;	/* disables bind/unbind via sysfs */
+	enum probe_type probe_type;
 
 	const struct of_device_id	*of_match_table;
 	const struct acpi_device_id	*acpi_match_table;
@@ -690,6 +720,7 @@ struct acpi_dev_node {
  * 		along with subsystem-level and driver-level callbacks.
  * @pins:	For device pin management.
  *		See Documentation/pinctrl.txt for details.
+ * @msi_domain: The generic MSI domain this device is using.
  * @numa_node:	NUMA node this device is close to.
  * @dma_mask:	Dma mask (if dma'ble device).
  * @coherent_dma_mask: Like dma_mask, but for alloc_coherent mapping as not all
@@ -750,6 +781,9 @@ struct device {
 	struct dev_pm_info	power;
 	struct dev_pm_domain	*pm_domain;
 
+#ifdef CONFIG_GENERIC_MSI_IRQ_DOMAIN
+	struct irq_domain	*msi_domain;
+#endif
 #ifdef CONFIG_PINCTRL
 	struct dev_pin_info	*pins;
 #endif
@@ -775,6 +809,7 @@ struct device {
 	struct cma *cma_area;		/* contiguous memory area for dma
 					   allocations */
 #endif
+	struct removed_region *removed_mem;
 	/* arch specific additions */
 	struct dev_archdata	archdata;
 
@@ -836,6 +871,22 @@ static inline void set_dev_node(struct device *dev, int node)
 {
 }
 #endif
+
+static inline struct irq_domain *dev_get_msi_domain(const struct device *dev)
+{
+#ifdef CONFIG_GENERIC_MSI_IRQ_DOMAIN
+	return dev->msi_domain;
+#else
+	return NULL;
+#endif
+}
+
+static inline void dev_set_msi_domain(struct device *dev, struct irq_domain *d)
+{
+#ifdef CONFIG_GENERIC_MSI_IRQ_DOMAIN
+	dev->msi_domain = d;
+#endif
+}
 
 static inline void *dev_get_drvdata(const struct device *dev)
 {
@@ -967,6 +1018,7 @@ extern int __must_check device_bind_driver(struct device *dev);
 extern void device_release_driver(struct device *dev);
 extern int  __must_check device_attach(struct device *dev);
 extern int __must_check driver_attach(struct device_driver *drv);
+extern void device_initial_probe(struct device *dev);
 extern int __must_check device_reprobe(struct device *dev);
 
 /*

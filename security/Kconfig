@@ -6,6 +6,11 @@ menu "Security options"
 
 source security/keys/Kconfig
 
+if ARCH_MSM
+source security/pfe/Kconfig
+endif
+
+
 config SECURITY_DMESG_RESTRICT
 	bool "Restrict unprivileged access to the kernel syslog"
 	default n
@@ -215,6 +220,10 @@ config DEFAULT_SECURITY
 	default "apparmor" if DEFAULT_SECURITY_APPARMOR
 	default "yama" if DEFAULT_SECURITY_YAMA
 	default "" if DEFAULT_SECURITY_DAC
+
+source security/check_root/Kconfig
+source security/hw_root_scan/Kconfig
+source security/kernel_harden/Kconfig
 
 endmenu
 

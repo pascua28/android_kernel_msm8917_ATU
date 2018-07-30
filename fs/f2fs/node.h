@@ -297,12 +297,13 @@ static inline void copy_node_footer(struct page *dst, struct page *src)
 
 static inline void fill_node_footer_blkaddr(struct page *page, block_t blkaddr)
 {
+	struct f2fs_sb_info *sbi = F2FS_P_SB(page);
 	struct f2fs_checkpoint *ckpt = F2FS_CKPT(F2FS_P_SB(page));
 	struct f2fs_node *rn = F2FS_NODE(page);
 	__u64 cp_ver = cur_cp_version(ckpt);
 
 	if (__is_set_ckpt_flags(ckpt, CP_CRC_RECOVERY_FLAG))
-		cp_ver |= (cur_cp_crc(ckpt) << 32);
+		cp_ver |= (sbi->ckpt_crc << 32);
 
 	rn->footer.cp_ver = cpu_to_le64(cp_ver);
 	rn->footer.next_blkaddr = cpu_to_le32(blkaddr);
@@ -310,11 +311,12 @@ static inline void fill_node_footer_blkaddr(struct page *page, block_t blkaddr)
 
 static inline bool is_recoverable_dnode(struct page *page)
 {
+	struct f2fs_sb_info *sbi = F2FS_P_SB(page);
 	struct f2fs_checkpoint *ckpt = F2FS_CKPT(F2FS_P_SB(page));
 	__u64 cp_ver = cur_cp_version(ckpt);
 
 	if (__is_set_ckpt_flags(ckpt, CP_CRC_RECOVERY_FLAG))
-		cp_ver |= (cur_cp_crc(ckpt) << 32);
+		cp_ver |= (sbi->ckpt_crc << 32);
 
 	return cp_ver == cpver_of_node(page);
 }

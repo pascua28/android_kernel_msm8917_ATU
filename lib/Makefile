@@ -34,6 +34,9 @@ lib-$(CONFIG_SMP) += cpumask.o
 lib-y	+= kobject.o klist.o
 obj-y	+= lockref.o
 
+KASAN_SANITIZE_find_next_bit.o := n
+KASAN_SANITIZE_find_last_bit.o := n
+
 obj-y += bcd.o div64.o sort.o parser.o halfmd4.o debug_locks.o random32.o \
 	 bust_spinlocks.o hexdump.o kasprintf.o bitmap.o scatterlist.o \
 	 gcd.o lcm.o list_sort.o uuid.o flex_array.o iovec.o clz_ctz.o \
@@ -42,11 +45,12 @@ obj-y += bcd.o div64.o sort.o parser.o halfmd4.o debug_locks.o random32.o \
 obj-y += string_helpers.o
 obj-$(CONFIG_TEST_STRING_HELPERS) += test-string_helpers.o
 obj-y += kstrtox.o
+obj-$(CONFIG_TEST_BPF) += test_bpf.o
+obj-$(CONFIG_TEST_FIRMWARE) += test_firmware.o
+obj-$(CONFIG_TEST_KASAN) += test_kasan.o
 obj-$(CONFIG_TEST_KSTRTOX) += test-kstrtox.o
 obj-$(CONFIG_TEST_LKM) += test_module.o
 obj-$(CONFIG_TEST_USER_COPY) += test_user_copy.o
-obj-$(CONFIG_TEST_BPF) += test_bpf.o
-obj-$(CONFIG_TEST_FIRMWARE) += test_firmware.o
 
 ifeq ($(CONFIG_DEBUG_KOBJECT),y)
 CFLAGS_kobject.o += -DDEBUG
@@ -154,7 +158,7 @@ obj-$(CONFIG_GLOB) += glob.o
 obj-$(CONFIG_MPILIB) += mpi/
 obj-$(CONFIG_SIGNATURE) += digsig.o
 
-obj-$(CONFIG_CLZ_TAB) += clz_tab.o
+lib-$(CONFIG_CLZ_TAB) += clz_tab.o
 
 obj-$(CONFIG_DDR) += jedec_ddr_data.o
 
@@ -208,3 +212,9 @@ quiet_cmd_build_OID_registry = GEN     $@
 clean-files	+= oid_registry_data.c
 
 obj-$(CONFIG_UCS2_STRING) += ucs2_string.o
+
+obj-$(CONFIG_QMI_ENCDEC) += qmi_encdec.o
+
+obj-$(CONFIG_UBSAN) += ubsan.o
+
+UBSAN_SANITIZE_ubsan.o := n

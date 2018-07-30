@@ -32,6 +32,7 @@ void ubi_dump_vid_hdr(const struct ubi_vid_hdr *vid_hdr);
 		pr_crit("UBI assert failed in %s at %u (pid %d)\n",          \
 		       __func__, __LINE__, current->pid);                    \
 		dump_stack();                                                \
+		BUG();                                                       \
 	}                                                                    \
 } while (0)
 
@@ -127,4 +128,16 @@ static inline int ubi_dbg_chk_gen(const struct ubi_device *ubi)
 {
 	return ubi->dbg.chk_gen;
 }
+
+static inline int ubi_dbg_chk_fastmap(const struct ubi_device *ubi)
+{
+	return ubi->dbg.chk_fastmap;
+}
+
+static inline void ubi_enable_dbg_chk_fastmap(struct ubi_device *ubi)
+{
+	ubi->dbg.chk_fastmap = 1;
+}
+
+int ubi_dbg_power_cut(struct ubi_device *ubi, int caller);
 #endif /* !__UBI_DEBUG_H__ */

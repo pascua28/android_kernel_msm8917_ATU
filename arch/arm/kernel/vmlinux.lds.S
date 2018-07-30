@@ -11,7 +11,7 @@
 #ifdef CONFIG_ARM_KERNMEM_PERMS
 #include <asm/pgtable.h>
 #endif
-	
+
 #define PROC_INFO							\
 	. = ALIGN(4);							\
 	VMLINUX_SYMBOL(__proc_info_begin) = .;				\
@@ -276,6 +276,12 @@ SECTIONS
 	}
 	_edata_loc = __data_loc + SIZEOF(.data);
 
+        . = ALIGN(32);
+        __start_hwlog_tag = .;
+        __start_hwlog_tag : {
+                *(__hwlog_tag)
+        }
+        __stop_hwlog_tag = .;
 #ifdef CONFIG_HAVE_TCM
         /*
 	 * We align everything to a page boundary so we can

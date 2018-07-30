@@ -21,6 +21,7 @@
 const char *usb_otg_state_string(enum usb_otg_state state)
 {
 	static const char *const names[] = {
+		[OTG_STATE_UNDEFINED] = "undefined",
 		[OTG_STATE_A_IDLE] = "a_idle",
 		[OTG_STATE_A_WAIT_VRISE] = "a_wait_vrise",
 		[OTG_STATE_A_WAIT_BCON] = "a_wait_bcon",
@@ -32,8 +33,10 @@ const char *usb_otg_state_string(enum usb_otg_state state)
 		[OTG_STATE_B_IDLE] = "b_idle",
 		[OTG_STATE_B_SRP_INIT] = "b_srp_init",
 		[OTG_STATE_B_PERIPHERAL] = "b_peripheral",
+		[OTG_STATE_B_CHARGER] = "b_charger",
 		[OTG_STATE_B_WAIT_ACON] = "b_wait_acon",
 		[OTG_STATE_B_HOST] = "b_host",
+		[OTG_STATE_B_SUSPEND] = "b_suspend",
 	};
 
 	if (state < 0 || state >= ARRAY_SIZE(names))

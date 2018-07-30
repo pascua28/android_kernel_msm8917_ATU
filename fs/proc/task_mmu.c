@@ -13,11 +13,17 @@
 #include <linux/swap.h>
 #include <linux/swapops.h>
 #include <linux/mmu_notifier.h>
+#include <linux/mm_inline.h>
+#include <linux/ctype.h>
 
 #include <asm/elf.h>
 #include <asm/uaccess.h>
 #include <asm/tlbflush.h>
 #include "internal.h"
+
+#ifdef CONFIG_HUAWEI_SWAP_ZDATA
+#include <linux/signal.h>
+#endif
 
 void task_mem(struct seq_file *m, struct mm_struct *mm)
 {
@@ -1341,7 +1347,7 @@ static ssize_t pagemap_read(struct file *file, char __user *buf,
 	if (!pm.buffer)
 		goto out_task;
 
-	mm = mm_access(task, PTRACE_MODE_READ);
+	mm = mm_access(task, PTRACE_MODE_READ_FSCREDS);
 	ret = PTR_ERR(mm);
 	if (!mm || IS_ERR(mm))
 		goto out_free;
@@ -1424,6 +1430,325 @@ const struct file_operations proc_pagemap_operations = {
 	.open		= pagemap_open,
 };
 #endif /* CONFIG_PROC_PAGE_MONITOR */
+
+#ifdef CONFIG_PROCESS_RECLAIM
+static int reclaim_pte_range(pmd_t *pmd, unsigned long addr,
+				unsigned long end, struct mm_walk *walk)
+{
+	struct reclaim_param *rp = walk->private;
+	struct vm_area_struct *vma = rp->vma;
+	pte_t *pte, ptent;
+	spinlock_t *ptl;
+	struct page *page;
+	LIST_HEAD(page_list);
+	int isolated;
+	int reclaimed;
+
+	split_huge_page_pmd(vma, addr, pmd);
+
+	if (rp->is_task_anon) {
+		if (pmd_trans_unstable(pmd) || !rp->nr_to_reclaim)
+			return 0;
+	} else {
+		if (pmd_trans_unstable(pmd))
+			return 0;
+	}
+
+cont:
+	isolated = 0;
+	pte = pte_offset_map_lock(vma->vm_mm, pmd, addr, &ptl);
+	for (; addr != end; pte++, addr += PAGE_SIZE) {
+		ptent = *pte;
+		if (!pte_present(ptent))
+			continue;
+
+		page = vm_normal_page(vma, addr, ptent);
+		if (!page)
+			continue;
+
+#ifdef CONFIG_TASK_PROTECT_LRU
+		// don't reclaim page in protected.
+		if (PageProtect(page))
+			continue;
+#endif
+
+		//we don't reclaim page in active lru list
+		if (rp->inactive_lru && (PageActive(page) ||
+		    PageUnevictable(page)))
+			continue;
+
+		if (rp->type == RECLAIM_ANON && !PageAnon(page))
+			continue;
+		if (rp->type == RECLAIM_FILE && PageAnon(page))
+			continue;
+
+		if (isolate_lru_page(page))
+			continue;
+
+		list_add(&page->lru, &page_list);
+		inc_zone_page_state(page, NR_ISOLATED_ANON +
+				page_is_file_cache(page));
+		isolated++;
+		rp->nr_scanned++;
+
+		if (rp->is_task_anon) {
+			if ((isolated >= SWAP_CLUSTER_MAX) || !rp->nr_to_reclaim)
+				break;
+		} else {
+			if (isolated >= SWAP_CLUSTER_MAX)
+				break;
+		}
+	}
+	pte_unmap_unlock(pte - 1, ptl);
+#ifdef CONFIG_HUAWEI_SWAP_ZDATA
+	reclaimed = reclaim_pages_from_list(&page_list, vma,
+				walk->hiber, &walk->nr_writedblock);
+	walk->nr_reclaimed += reclaimed;
+#else
+	reclaimed = reclaim_pages_from_list(&page_list, vma);
+#endif
+	rp->nr_reclaimed += reclaimed;
+	rp->nr_to_reclaim -= reclaimed;
+	if (rp->nr_to_reclaim < 0)
+		rp->nr_to_reclaim = 0;
+
+	if (rp->is_task_anon) {
+		if (rp->nr_to_reclaim && (addr != end))
+			goto cont;
+	} else {
+		if (addr != end)
+			goto cont;
+	}
+
+	cond_resched();
+	return 0;
+}
+
+struct reclaim_param reclaim_task_anon(struct task_struct *task,
+		int nr_to_reclaim)
+{
+	struct mm_struct *mm;
+	struct vm_area_struct *vma;
+	struct mm_walk reclaim_walk = {};
+	struct reclaim_param rp;
+
+	rp.nr_reclaimed = 0;
+	rp.nr_scanned = 0;
+	get_task_struct(task);
+	mm = get_task_mm(task);
+	if (!mm)
+		goto out;
+
+	reclaim_walk.mm = mm;
+	reclaim_walk.pmd_entry = reclaim_pte_range;
+
+	rp.nr_to_reclaim = nr_to_reclaim;
+	rp.is_task_anon = true;
+	reclaim_walk.private = &rp;
+
+	down_read(&mm->mmap_sem);
+	for (vma = mm->mmap; vma; vma = vma->vm_next) {
+		if (is_vm_hugetlb_page(vma))
+			continue;
+
+		if (vma->vm_file)
+			continue;
+
+		if (vma->vm_flags & VM_LOCKED)
+			continue;
+
+		if (!rp.nr_to_reclaim)
+			break;
+
+		rp.vma = vma;
+		walk_page_range(vma->vm_start, vma->vm_end,
+			&reclaim_walk);
+	}
+
+	flush_tlb_mm(mm);
+	up_read(&mm->mmap_sem);
+	mmput(mm);
+out:
+	put_task_struct(task);
+	return rp;
+}
+
+static ssize_t reclaim_write(struct file *file, const char __user *buf,
+				size_t count, loff_t *ppos)
+{
+	struct task_struct *task;
+	char buffer[200];
+	struct mm_struct *mm;
+	struct vm_area_struct *vma;
+	enum reclaim_type type;
+	char *type_buf;
+	struct mm_walk reclaim_walk = {};
+	unsigned long start = 0;
+	unsigned long end = 0;
+	struct reclaim_param rp = {NULL, 0, 0, 0, false, false, RECLAIM_ANON};
+#ifdef CONFIG_HUAWEI_SWAP_ZDATA
+	struct timeval start_time;
+	struct timeval stop_time;
+	s64 elapsed_centisecs64;
+	reclaim_walk.nr_reclaimed = 0;
+	reclaim_walk.nr_writedblock = 0;
+#endif
+
+	memset(buffer, 0, sizeof(buffer));
+	if (count > sizeof(buffer) - 1)
+		count = sizeof(buffer) - 1;
+
+	if (copy_from_user(buffer, buf, count))
+		return -EFAULT;
+
+	type_buf = strstrip(buffer);
+#ifdef CONFIG_HUAWEI_SWAP_ZDATA
+	reclaim_walk.hiber = false;
+#endif
+
+	if (!strcmp(type_buf, "soft"))
+		type = RECLAIM_SOFT;
+	else if (!strcmp(type_buf, "inactive"))
+		type = RECLAIM_INACTIVE;
+	else if (!strcmp(type_buf, "file"))
+		type = RECLAIM_FILE;
+	else if (!strcmp(type_buf, "anon"))
+		type = RECLAIM_ANON;
+	else if (!strcmp(type_buf, "all"))
+		type = RECLAIM_ALL;
+#ifdef CONFIG_HUAWEI_SWAP_ZDATA
+	else if (!strcmp(type_buf, "hiber")) {
+		type = RECLAIM_ALL;
+		reclaim_walk.hiber = true;
+	} else if (!strcmp(type_buf, "hiber_anon")) {
+		type = RECLAIM_ANON;
+		reclaim_walk.hiber = true;
+	} else if (!strcmp(type_buf, "hiber_file")) {
+		type = RECLAIM_FILE;
+		reclaim_walk.hiber = true;
+	}
+#endif
+	else if (isdigit(*type_buf))
+		type = RECLAIM_RANGE;
+	else
+		goto out_err;
+
+	rp.type = type;
+
+	if (type == RECLAIM_RANGE) {
+		char *token;
+		unsigned long long len, len_in, tmp;
+		token = strsep(&type_buf, " ");
+		if (!token)
+			goto out_err;
+		tmp = memparse(token, &token);
+		if (tmp & ~PAGE_MASK || tmp > ULONG_MAX)
+			goto out_err;
+		start = tmp;
+
+		token = strsep(&type_buf, " ");
+		if (!token)
+			goto out_err;
+		len_in = memparse(token, &token);
+		len = (len_in + ~PAGE_MASK) & PAGE_MASK;
+		if (len > ULONG_MAX)
+			goto out_err;
+		/*
+		 * Check to see whether len was rounded up from small -ve
+		 * to zero.
+		 */
+		if (len_in && !len)
+			goto out_err;
+
+		end = start + len;
+		if (end < start)
+			goto out_err;
+	}
+
+	task = get_proc_task(file->f_path.dentry->d_inode);
+	if (!task)
+		return -ESRCH;
+
+	mm = get_task_mm(task);
+	if (!mm)
+		goto out;
+	//here we add a soft shrinker for reclaim
+	if (type == RECLAIM_SOFT) {
+		smart_soft_shrink(mm);
+		mmput(mm);
+		goto out;
+	}
+
+	if (type == RECLAIM_INACTIVE)
+		rp.inactive_lru = true;
+
+	reclaim_walk.mm = mm;
+	reclaim_walk.pmd_entry = reclaim_pte_range;
+#ifdef CONFIG_HUAWEI_SWAP_ZDATA
+	if (reclaim_walk.hiber)
+		do_gettimeofday(&start_time);
+#endif
+
+	rp.nr_to_reclaim = ~0;
+	rp.nr_reclaimed = 0;
+	reclaim_walk.private = &rp;
+
+	down_read(&mm->mmap_sem);
+	if (type == RECLAIM_RANGE) {
+		vma = find_vma(mm, start);
+		while (vma) {
+			if (vma->vm_start > end)
+				break;
+			if (is_vm_hugetlb_page(vma))
+				continue;
+
+			rp.vma = vma;
+			walk_page_range(max(vma->vm_start, start),
+					min(vma->vm_end, end),
+					&reclaim_walk);
+			vma = vma->vm_next;
+		}
+	} else {
+		for (vma = mm->mmap; vma; vma = vma->vm_next) {
+			if (is_vm_hugetlb_page(vma))
+				continue;
+
+#ifdef CONFIG_HUAWEI_SWAP_ZDATA
+			if (reclaim_walk.hiber && reclaim_sigusr_pending(current))
+				break;
+#endif
+			rp.vma = vma;
+			walk_page_range(vma->vm_start, vma->vm_end,
+				&reclaim_walk);
+		}
+	}
+
+	flush_tlb_mm(mm);
+	up_read(&mm->mmap_sem);
+	mmput(mm);
+#ifdef CONFIG_HUAWEI_SWAP_ZDATA
+	if (reclaim_walk.hiber) {
+		do_gettimeofday(&stop_time);
+		elapsed_centisecs64 = timeval_to_ns(&stop_time) -
+					timeval_to_ns(&start_time);
+
+		process_reclaim_result_write(task, reclaim_walk.nr_reclaimed,
+			reclaim_walk.nr_writedblock, elapsed_centisecs64);
+	}
+#endif
+out:
+	put_task_struct(task);
+	return count;
+
+out_err:
+	return -EINVAL;
+}
+
+const struct file_operations proc_reclaim_operations = {
+	.write		= reclaim_write,
+	.llseek		= noop_llseek,
+};
+#endif
 
 #ifdef CONFIG_NUMA
 

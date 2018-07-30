@@ -133,6 +133,8 @@
 #include <linux/vmalloc.h>
 #include <linux/if_macvlan.h>
 #include <linux/errqueue.h>
+#include <linux/tcp.h>
+#include <net/tcp.h>
 
 #include "net-sysfs.h"
 
@@ -2634,6 +2636,37 @@ static int xmit_one(struct sk_buff *skb, struct net_device *dev,
 	return rc;
 }
 
+static int xmit_list(struct sk_buff *list, struct net_device *dev,
+		     struct netdev_queue *txq)
+{
+	unsigned int len;
+	int rc;
+	struct sk_buff *skb = list, *head = list;
+
+	/* Call the taps for individual skb's in the list. */
+	if (!list_empty(&ptype_all)) {
+		while (skb) {
+			struct sk_buff *next = skb->next;
+
+			skb->next = NULL;
+
+			dev_queue_xmit_nit(skb, dev);
+
+			skb = next;
+			/* Keep the original list intact. */
+			head->next = skb;
+			head = head->next;
+		}
+	}
+
+	len = list->len;
+	trace_net_dev_start_xmit(list, dev);
+	rc = netdev_start_xmit(list, dev, txq, false);
+	trace_net_dev_xmit(list, rc, dev, len);
+
+	return rc;
+}
+
 struct sk_buff *dev_hard_start_xmit(struct sk_buff *first, struct net_device *dev,
 				    struct netdev_queue *txq, int *ret)
 {
@@ -2655,6 +2688,25 @@ struct sk_buff *dev_hard_start_xmit(struct sk_buff *first, struct net_device *de
 			rc = NETDEV_TX_BUSY;
 			break;
 		}
+	}
+
+out:
+	*ret = rc;
+	return skb;
+}
+
+struct sk_buff *dev_hard_start_xmit_list(struct sk_buff *first,
+					 struct net_device *dev,
+					struct netdev_queue *txq, int *ret)
+{
+	struct sk_buff *skb = first;
+	int rc = NETDEV_TX_OK;
+
+	if (skb) {
+		rc = xmit_list(skb, dev, txq);
+		if (unlikely(!dev_xmit_complete(rc)))
+			goto out;
+		skb = NULL;
 	}
 
 out:
@@ -2686,6 +2738,10 @@ static struct sk_buff *validate_xmit_skb(struct sk_buff *skb, struct net_device 
 	if (netif_needs_gso(dev, skb, features)) {
 		struct sk_buff *segs;
 
+		__be16 src_port = tcp_hdr(skb)->source;
+		__be16 dest_port = tcp_hdr(skb)->dest;
+
+		trace_print_skb_gso(skb, src_port, dest_port);
 		segs = skb_gso_segment(skb, features);
 		if (IS_ERR(segs)) {
 			goto out_kfree_skb;
@@ -2725,7 +2781,7 @@ out_null:
 
 struct sk_buff *validate_xmit_skb_list(struct sk_buff *skb, struct net_device *dev)
 {
-	struct sk_buff *next, *head = NULL, *tail;
+	struct sk_buff *next, *head = NULL, *tail = NULL;
 
 	for (; skb != NULL; skb = next) {
 		next = skb->next;
@@ -2883,6 +2939,7 @@ EXPORT_SYMBOL(dev_loopback_xmit);
  *	__dev_queue_xmit - transmit a buffer
  *	@skb: buffer to transmit
  *	@accel_priv: private data used for L2 forwarding offload
+ *	@skb_list: Boolean used for skb list processing.
  *
  *	Queue a buffer for transmission to a network device. The caller must
  *	have set the device and priority and built the buffer before calling
@@ -2905,7 +2962,8 @@ EXPORT_SYMBOL(dev_loopback_xmit);
  *      the BH enable code must have IRQs enabled so that it will not deadlock.
  *          --BLG
  */
-static int __dev_queue_xmit(struct sk_buff *skb, void *accel_priv)
+static int __dev_queue_xmit(struct sk_buff *skb, void *accel_priv,
+			    bool skb_list)
 {
 	struct net_device *dev = skb->dev;
 	struct netdev_queue *txq;
@@ -2972,7 +3030,14 @@ static int __dev_queue_xmit(struct sk_buff *skb, void *accel_priv)
 
 			if (!netif_xmit_stopped(txq)) {
 				__this_cpu_inc(xmit_recursion);
-				skb = dev_hard_start_xmit(skb, dev, txq, &rc);
+				if (likely(!skb_list))
+					skb = dev_hard_start_xmit(skb, dev,
+								  txq, &rc);
+				else
+					skb = dev_hard_start_xmit_list(skb,
+								       dev,
+								       txq,
+								       &rc);
 				__this_cpu_dec(xmit_recursion);
 				if (dev_xmit_complete(rc)) {
 					HARD_TX_UNLOCK(dev, txq);
@@ -3006,15 +3071,21 @@ out:
 
 int dev_queue_xmit(struct sk_buff *skb)
 {
-	return __dev_queue_xmit(skb, NULL);
+	return __dev_queue_xmit(skb, NULL, false);
 }
 EXPORT_SYMBOL(dev_queue_xmit);
 
 int dev_queue_xmit_accel(struct sk_buff *skb, void *accel_priv)
 {
-	return __dev_queue_xmit(skb, accel_priv);
+	return __dev_queue_xmit(skb, accel_priv, false);
 }
 EXPORT_SYMBOL(dev_queue_xmit_accel);
+
+int dev_queue_xmit_list(struct sk_buff *skb)
+{
+	return __dev_queue_xmit(skb, NULL, true);
+}
+EXPORT_SYMBOL(dev_queue_xmit_list);
 
 
 /*=======================================================================
@@ -3355,6 +3426,9 @@ static int netif_rx_internal(struct sk_buff *skb)
 
 	trace_netif_rx(skb);
 #ifdef CONFIG_RPS
+	WARN_ONCE(skb_cloned(skb), "Cloned packet from dev %s\n",
+		  skb->dev->name);
+
 	if (static_key_false(&rps_needed)) {
 		struct rps_dev_flow voidflow, *rflow = &voidflow;
 		int cpu;
@@ -3622,6 +3696,16 @@ static bool skb_pfmemalloc_protocol(struct sk_buff *skb)
 	}
 }
 
+int (*gsb_nw_stack_recv)(struct sk_buff *skb) __rcu __read_mostly;
+EXPORT_SYMBOL(gsb_nw_stack_recv);
+
+int (*athrs_fast_nat_recv)(struct sk_buff *skb,
+			   struct packet_type *pt_temp) __rcu __read_mostly;
+EXPORT_SYMBOL(athrs_fast_nat_recv);
+
+int (*embms_tm_multicast_recv)(struct sk_buff *skb) __rcu __read_mostly;
+EXPORT_SYMBOL(embms_tm_multicast_recv);
+
 static int __netif_receive_skb_core(struct sk_buff *skb, bool pfmemalloc)
 {
 	struct packet_type *ptype, *pt_prev;
@@ -3631,6 +3715,9 @@ static int __netif_receive_skb_core(struct sk_buff *skb, bool pfmemalloc)
 	bool deliver_exact = false;
 	int ret = NET_RX_DROP;
 	__be16 type;
+	int (*gsb_ns_recv)(struct sk_buff *skb);
+	int (*fast_recv)(struct sk_buff *skb, struct packet_type *pt_temp);
+	int (*embms_recv)(struct sk_buff *skb);
 
 	net_timestamp_check(!netdev_tstamp_prequeue, skb);
 
@@ -3676,6 +3763,26 @@ another_round:
 	}
 
 skip_taps:
+	gsb_ns_recv = rcu_dereference(gsb_nw_stack_recv);
+	if (gsb_ns_recv) {
+		if (gsb_ns_recv(skb)) {
+			ret = NET_RX_SUCCESS;
+			goto out;
+		}
+	}
+
+	fast_recv = rcu_dereference(athrs_fast_nat_recv);
+	if (fast_recv) {
+		if (fast_recv(skb, pt_prev)) {
+			ret = NET_RX_SUCCESS;
+			goto out;
+		}
+	}
+
+	embms_recv = rcu_dereference(embms_tm_multicast_recv);
+	if (embms_recv)
+		embms_recv(skb);
+
 #ifdef CONFIG_NET_CLS_ACT
 	skb = handle_ing(skb, &pt_prev, &ret, orig_dev);
 	if (!skb)
@@ -3897,6 +4004,7 @@ static int napi_gro_complete(struct sk_buff *skb)
 	}
 
 out:
+	__this_cpu_add(softnet_data.gro_coalesced, NAPI_GRO_CB(skb)->count > 1);
 	return netif_receive_skb_internal(skb);
 }
 
@@ -3939,6 +4047,7 @@ static void gro_list_prepare(struct napi_struct *napi, struct sk_buff *skb)
 		unsigned long diffs;
 
 		NAPI_GRO_CB(p)->flush = 0;
+		NAPI_GRO_CB(p)->flush_id = 0;
 
 		if (hash != skb_get_hash_raw(p)) {
 			NAPI_GRO_CB(p)->same_flow = 0;
@@ -4025,6 +4134,7 @@ static enum gro_result dev_gro_receive(struct napi_struct *napi, struct sk_buff 
 		NAPI_GRO_CB(skb)->flush = 0;
 		NAPI_GRO_CB(skb)->free = 0;
 		NAPI_GRO_CB(skb)->encap_mark = 0;
+		NAPI_GRO_CB(skb)->recursion_counter = 0;
 
 		/* Setup for GRO checksum validation */
 		switch (skb->ip_summed) {
@@ -4318,9 +4428,15 @@ static void net_rps_action_and_irq_enable(struct softnet_data *sd)
 		while (remsd) {
 			struct softnet_data *next = remsd->rps_ipi_next;
 
-			if (cpu_online(remsd->cpu))
+			if (cpu_online(remsd->cpu)) {
 				smp_call_function_single_async(remsd->cpu,
 							   &remsd->csd);
+			} else {
+				pr_err("%s() cpu offline\n", __func__);
+				rps_lock(remsd);
+				remsd->backlog.state = 0;
+				rps_unlock(remsd);
+			}
 			remsd = next;
 		}
 	} else
@@ -4355,8 +4471,7 @@ static int process_backlog(struct napi_struct *napi, int quota)
 			local_irq_disable();
 			input_queue_head_incr(sd);
 			if (++work >= quota) {
-				local_irq_enable();
-				return work;
+				goto state_changed;
 			}
 		}
 
@@ -4374,14 +4489,17 @@ static int process_backlog(struct napi_struct *napi, int quota)
 			napi->state = 0;
 			rps_unlock(sd);
 
-			break;
+			goto state_changed;
 		}
 
 		skb_queue_splice_tail_init(&sd->input_pkt_queue,
 					   &sd->process_queue);
 		rps_unlock(sd);
 	}
+state_changed:
 	local_irq_enable();
+	napi_gro_flush(napi, false);
+	sd->current_napi = NULL;
 
 	return work;
 }
@@ -4404,11 +4522,14 @@ EXPORT_SYMBOL(__napi_schedule);
 
 void __napi_complete(struct napi_struct *n)
 {
+	struct softnet_data *sd = &__get_cpu_var(softnet_data);
+
 	BUG_ON(!test_bit(NAPI_STATE_SCHED, &n->state));
 	BUG_ON(n->gro_list);
 
 	list_del(&n->poll_list);
 	smp_mb__before_atomic();
+	sd->current_napi = NULL;
 	clear_bit(NAPI_STATE_SCHED, &n->state);
 }
 EXPORT_SYMBOL(__napi_complete);
@@ -4516,6 +4637,14 @@ void netif_napi_del(struct napi_struct *napi)
 }
 EXPORT_SYMBOL(netif_napi_del);
 
+struct napi_struct *get_current_napi_context(void)
+{
+	struct softnet_data *sd = &__get_cpu_var(softnet_data);
+
+	return sd->current_napi;
+}
+EXPORT_SYMBOL(get_current_napi_context);
+
 static void net_rx_action(struct softirq_action *h)
 {
 	struct softnet_data *sd = this_cpu_ptr(&softnet_data);
@@ -4557,6 +4686,7 @@ static void net_rx_action(struct softirq_action *h)
 		 */
 		work = 0;
 		if (test_bit(NAPI_STATE_SCHED, &n->state)) {
+			sd->current_napi = n;
 			work = n->poll(n, weight);
 			trace_napi_poll(n);
 		}
@@ -5849,7 +5979,9 @@ static void rollback_registered_many(struct list_head *head)
 {
 	struct net_device *dev, *tmp;
 	LIST_HEAD(close_head);
-
+#ifdef CONFIG_HUAWEI_WIFI
+	pr_err("rollback_registered_many:  enter\n");
+#endif
 	BUG_ON(dev_boot_phase);
 	ASSERT_RTNL();
 
@@ -5893,8 +6025,13 @@ static void rollback_registered_many(struct list_head *head)
 		/* Notify protocols, that we are about to destroy
 		   this device. They should clean all the things.
 		*/
+#ifdef CONFIG_HUAWEI_WIFI
+		pr_err("call_netdevice_notifiers:  will enter\n");
+#endif
 		call_netdevice_notifiers(NETDEV_UNREGISTER, dev);
-
+#ifdef CONFIG_HUAWEI_WIFI
+		pr_err("call_netdevice_notifiers:  exit\n");
+#endif
 		/*
 		 *	Flush the unicast and multicast chains
 		 */
@@ -5923,6 +6060,9 @@ static void rollback_registered_many(struct list_head *head)
 
 	list_for_each_entry(dev, head, unreg_list)
 		dev_put(dev);
+#ifdef CONFIG_HUAWEI_WIFI
+	pr_err("rollback_registered_many:  exit\n");
+#endif
 }
 
 static void rollback_registered(struct net_device *dev)

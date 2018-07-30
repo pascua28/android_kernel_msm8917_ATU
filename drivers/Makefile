@@ -18,6 +18,7 @@ obj-$(CONFIG_PCI)		+= pci/
 obj-$(CONFIG_PARISC)		+= parisc/
 obj-$(CONFIG_RAPIDIO)		+= rapidio/
 obj-y				+= video/
+obj-$(CONFIG_LCDKIT_DRIVER)     += devkit/lcdkit/
 obj-y				+= idle/
 
 # IPMI must come before ACPI in order to provide IPMI opregion support
@@ -60,17 +61,20 @@ obj-$(CONFIG_FB_I810)           += video/fbdev/i810/
 obj-$(CONFIG_FB_INTEL)          += video/fbdev/intelfb/
 
 obj-$(CONFIG_PARPORT)		+= parport/
-obj-y				+= base/ block/ misc/ mfd/ nfc/
+obj-y				+= base/ block/ misc/ mfd/ nfc/ soc/
 obj-$(CONFIG_DMA_SHARED_BUFFER) += dma-buf/
 obj-$(CONFIG_NUBUS)		+= nubus/
 obj-y				+= macintosh/
 obj-$(CONFIG_IDE)		+= ide/
+obj-$(CONFIG_CRYPTO)		+= crypto/
 obj-$(CONFIG_SCSI)		+= scsi/
 obj-$(CONFIG_ATA)		+= ata/
 obj-$(CONFIG_TARGET_CORE)	+= target/
 obj-$(CONFIG_MTD)		+= mtd/
 obj-$(CONFIG_SPI)		+= spi/
 obj-$(CONFIG_SPMI)		+= spmi/
+obj-$(CONFIG_SLIMBUS)           += slimbus/
+obj-$(CONFIG_SOUNDWIRE)		+= soundwire/
 obj-y				+= hsi/
 obj-y				+= net/
 obj-$(CONFIG_ATM)		+= atm/
@@ -121,7 +125,6 @@ obj-$(CONFIG_SWITCH)		+= switch/
 obj-$(CONFIG_INFINIBAND)	+= infiniband/
 obj-$(CONFIG_SGI_SN)		+= sn/
 obj-y				+= firmware/
-obj-$(CONFIG_CRYPTO)		+= crypto/
 obj-$(CONFIG_SUPERH)		+= sh/
 obj-$(CONFIG_ARCH_SHMOBILE)	+= sh/
 ifndef CONFIG_ARCH_USES_GETTIMEOFFSET
@@ -162,3 +165,48 @@ obj-$(CONFIG_POWERCAP)		+= powercap/
 obj-$(CONFIG_MCB)		+= mcb/
 obj-$(CONFIG_RAS)		+= ras/
 obj-$(CONFIG_THUNDERBOLT)	+= thunderbolt/
+obj-$(CONFIG_CORESIGHT)		+= coresight/
+obj-$(CONFIG_ESOC)		+= esoc/
+
+obj-$(CONFIG_BIF)		+= bif/
+
+obj-$(CONFIG_SENSORS)		+= sensors/
+obj-$(CONFIG_SENSORS_SSC)	+= sensors/
+
+obj-$(CONFIG_HUAWEI_DRIVERS)	+=huawei_platform/
+obj-$(CONFIG_HW_GADGET)     += hwusb/
+
+obj-$(CONFIG_HUAWEI_BFM)     += hwbfm/
+
+obj-$(CONFIG_HUAWEI_FACTORY_INFO) += hw_fac_info/
+
+obj-$(CONFIG_HUAWEI_DEV_DETECT)  += dev_detect/
+obj-$(CONFIG_HW_WIFIPRO)       += hwnet/
+obj-$(CONFIG_PRONTO_WLAN)      += ../../../vendor/qcom/opensource/wlan/prima/
+obj-$(CONFIG_HUAWEI_TS_KIT) += devkit/tpkit/
+obj-$(CONFIG_SRECORDER)     += srecorder/
+
+obj-$(CONFIG_SWITCH)			+=  hw_usb/switch/
+
+obj-$(CONFIG_HUAWEI_SENSOR_INFO)			+= hwsensor/
+
+#/* AR0009CRQN yuanshuai 20170919 begin */
+obj-$(CONFIG_HUAWEI_BOOT_TIME) +=boottime/
+#/* AR0009CRQN yuanshuai 20170919 end */
+
+obj-$(CONFIG_LOG_EXCEPTION) += log_usertype/
+obj-$(CONFIG_HUAWEI_DSM)    += dsm/
+obj-$(CONFIG_CPU_STRESS_TEST) += cpu_stress/
+obj-$(CONFIG_HUAWEI_CPU_INFO) += cpuinfo/
+obj-$(CONFIG_LOGGER_EXTEND) += log/
+obj-$(CONFIG_HW_KHARDEN_DEBUG) += hw_kharden_test/
+obj-$(CONFIG_AUDIOKIT) += devkit/audiokit/
+obj-$(CONFIG_HUAWEI_DEVICE_DETCET) += hw_devices/
+obj-$(CONFIG_HW_CPULOAD_NOTI) += cpuload/
+obj-$(CONFIG_HW_MEMORY_MONITOR) += mmonitor/
+obj-$(CONFIG_HW_MEMORY_MONITOR) += allocpages_delayacct/
+obj-$(CONFIG_HW_ZEROHUNG)    += hwzerohung/
+obj-$(CONFIG_HW_CGROUP_PIDS)    += cgroup/
+
+obj-y += cfi/
+obj-y += huawei/

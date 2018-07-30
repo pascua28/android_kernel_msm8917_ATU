@@ -16,7 +16,6 @@
 #include <linux/ctype.h>
 #include <linux/dcache.h>
 #include <linux/namei.h>
-#include <linux/quotaops.h>
 
 #include "f2fs.h"
 #include "node.h"
@@ -44,8 +43,6 @@ static struct inode *f2fs_new_inode(struct inode *dir, umode_t mode)
 	}
 	f2fs_unlock_op(sbi);
 
-	nid_free = true;
-
 	inode_init_owner(inode, dir, mode);
 
 	inode->i_ino = ino;
@@ -56,14 +53,9 @@ static struct inode *f2fs_new_inode(struct inode *dir, umode_t mode)
 	err = insert_inode_locked(inode);
 	if (err) {
 		err = -EINVAL;
+		nid_free = true;
 		goto fail;
 	}
-
-	dquot_initialize(inode);
-
-	err = dquot_alloc_inode(inode);
-	if (err)
-		goto fail_drop;
 
 	/* If the directory encrypted, then we should encrypt the inode. */
 	if (f2fs_encrypted_inode(dir) && f2fs_may_encrypt(inode))
@@ -92,16 +84,6 @@ fail:
 	make_bad_inode(inode);
 	if (nid_free)
 		set_inode_flag(inode, FI_FREE_NID);
-	iput(inode);
-	return ERR_PTR(err);
-fail_drop:
-	trace_f2fs_new_inode(inode, err);
-	dquot_drop(inode);
-	inode->i_flags |= S_NOQUOTA;
-	if (nid_free)
-		set_inode_flag(inode, FI_FREE_NID);
-	clear_nlink(inode);
-	unlock_new_inode(inode);
 	iput(inode);
 	return ERR_PTR(err);
 }
@@ -155,8 +137,6 @@ static int f2fs_create(struct inode *dir, struct dentry *dentry, umode_t mode,
 	nid_t ino = 0;
 	int err;
 
-	dquot_initialize(dir);
-
 	inode = f2fs_new_inode(dir, mode);
 	if (IS_ERR(inode))
 		return PTR_ERR(inode);
@@ -200,8 +180,6 @@ static int f2fs_link(struct dentry *old_dentry, struct inode *dir,
 	if (f2fs_encrypted_inode(dir) &&
 			!fscrypt_has_permitted_context(dir, inode))
 		return -EPERM;
-
-	dquot_initialize(dir);
 
 	f2fs_balance_fs(sbi, true);
 
@@ -370,8 +348,6 @@ static int f2fs_unlink(struct inode *dir, struct dentry *dentry)
 
 	trace_f2fs_unlink_enter(dir, dentry);
 
-	dquot_initialize(dir);
-
 	de = f2fs_find_entry(dir, &dentry->d_name, &page);
 	if (!de) {
 		if (IS_ERR(page))
@@ -445,8 +421,6 @@ static int f2fs_symlink(struct inode *dir, struct dentry *dentry,
 
 	if (disk_link.len > dir->i_sb->s_blocksize)
 		return -ENAMETOOLONG;
-
-	dquot_initialize(dir);
 
 	inode = f2fs_new_inode(dir, S_IFLNK | S_IRWXUGO);
 	if (IS_ERR(inode))
@@ -535,8 +509,6 @@ static int f2fs_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
 	struct inode *inode;
 	int err;
 
-	dquot_initialize(dir);
-
 	inode = f2fs_new_inode(dir, S_IFDIR | mode);
 	if (IS_ERR(inode))
 		return PTR_ERR(inode);
@@ -588,8 +560,6 @@ static int f2fs_mknod(struct inode *dir, struct dentry *dentry,
 	if (!new_valid_dev(rdev))
 		return -EINVAL;
 
-	dquot_initialize(dir);
-
 	inode = f2fs_new_inode(dir, mode);
 	if (IS_ERR(inode))
 		return PTR_ERR(inode);
@@ -624,8 +594,6 @@ static int __f2fs_tmpfile(struct inode *dir, struct dentry *dentry,
 	struct f2fs_sb_info *sbi = F2FS_I_SB(dir);
 	struct inode *inode;
 	int err;
-
-	dquot_initialize(dir);
 
 	inode = f2fs_new_inode(dir, mode);
 	if (IS_ERR(inode))
@@ -719,10 +687,6 @@ static int f2fs_rename(struct inode *old_dir, struct dentry *old_dentry,
 		err = -EPERM;
 		goto out;
 	}
-
-	dquot_initialize(old_dir);
-
-	dquot_initialize(new_dir);
 
 	old_entry = f2fs_find_entry(old_dir, &old_dentry->d_name, &old_page);
 	if (!old_entry) {
@@ -903,10 +867,6 @@ static int f2fs_cross_rename(struct inode *old_dir, struct dentry *old_dentry,
 			(!fscrypt_has_permitted_context(new_dir, old_inode) ||
 			 !fscrypt_has_permitted_context(old_dir, new_inode)))
 		return -EPERM;
-
-	dquot_initialize(old_dir);
-
-	dquot_initialize(new_dir);
 
 	old_entry = f2fs_find_entry(old_dir, &old_dentry->d_name, &old_page);
 	if (!old_entry) {

@@ -15,20 +15,6 @@
 
 #define MMC_CMD_RETRIES        3
 
-struct mmc_bus_ops {
-	void (*remove)(struct mmc_host *);
-	void (*detect)(struct mmc_host *);
-	int (*pre_suspend)(struct mmc_host *);
-	int (*suspend)(struct mmc_host *);
-	int (*resume)(struct mmc_host *);
-	int (*runtime_suspend)(struct mmc_host *);
-	int (*runtime_resume)(struct mmc_host *);
-	int (*power_save)(struct mmc_host *);
-	int (*power_restore)(struct mmc_host *);
-	int (*alive)(struct mmc_host *);
-	int (*shutdown)(struct mmc_host *);
-};
-
 void mmc_attach_bus(struct mmc_host *host, const struct mmc_bus_ops *ops);
 void mmc_detach_bus(struct mmc_host *host);
 
@@ -39,6 +25,8 @@ void mmc_init_erase(struct mmc_card *card);
 
 void mmc_set_chip_select(struct mmc_host *host, int mode);
 void mmc_set_clock(struct mmc_host *host, unsigned int hz);
+int mmc_clk_update_freq(struct mmc_host *host,
+		unsigned long freq, enum mmc_load state);
 void mmc_gate_clock(struct mmc_host *host);
 void mmc_ungate_clock(struct mmc_host *host);
 void mmc_set_ungated(struct mmc_host *host);
@@ -58,6 +46,8 @@ static inline void mmc_delay(unsigned int ms)
 	if (ms < 1000 / HZ) {
 		cond_resched();
 		mdelay(ms);
+	} else if (ms < jiffies_to_msecs(2)) {
+		usleep_range(ms * 1000, (ms + 1) * 1000);
 	} else {
 		msleep(ms);
 	}
@@ -85,7 +75,18 @@ void mmc_remove_card_debugfs(struct mmc_card *card);
 
 void mmc_init_context_info(struct mmc_host *host);
 
+#ifdef CONFIG_MMC_PASSWORDS
+int mmc_sd_init_card(struct mmc_host *host, u32 ocr,
+       struct mmc_card *oldcard);
+#endif
+
 int mmc_execute_tuning(struct mmc_card *card);
 
+extern bool mmc_can_scale_clk(struct mmc_host *host);
+extern int mmc_init_clk_scaling(struct mmc_host *host);
+extern int mmc_suspend_clk_scaling(struct mmc_host *host);
+extern int mmc_resume_clk_scaling(struct mmc_host *host);
+extern int mmc_exit_clk_scaling(struct mmc_host *host);
+extern unsigned long mmc_get_max_frequency(struct mmc_host *host);
 #endif
 

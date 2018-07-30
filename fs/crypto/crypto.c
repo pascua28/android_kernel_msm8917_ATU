@@ -246,12 +246,11 @@ struct page *fscrypt_alloc_bounce_page(struct fscrypt_ctx *ctx,
  * Return: A page with the encrypted content on success. Else, an
  * error value or NULL.
  */
-struct page *fscrypt_encrypt_page(const struct inode *inode,
+struct page *do_encrypt_page(const struct inode *inode,
 				struct page *page,
 				unsigned int len,
 				unsigned int offs,
 				u64 lblk_num, gfp_t gfp_flags)
-
 {
 	struct fscrypt_ctx *ctx;
 	struct page *ciphertext_page = page;
@@ -269,8 +268,6 @@ struct page *fscrypt_encrypt_page(const struct inode *inode,
 
 		return ciphertext_page;
 	}
-
-	BUG_ON(!PageLocked(page));
 
 	ctx = fscrypt_get_ctx(inode, gfp_flags);
 	if (IS_ERR(ctx))
@@ -298,7 +295,57 @@ errout:
 	fscrypt_release_ctx(ctx);
 	return ciphertext_page;
 }
+
+struct page *fscrypt_encrypt_page(const struct inode *inode,
+				struct page *page,
+				unsigned int len,
+				unsigned int offs,
+				u64 lblk_num, gfp_t gfp_flags)
+{
+
+	if (!(inode->i_sb->s_cop->flags & FS_CFLG_OWN_PAGES))
+		BUG_ON(!PageLocked(page));
+
+	return do_encrypt_page(inode, page, len, offs, lblk_num, gfp_flags);
+}
 EXPORT_SYMBOL(fscrypt_encrypt_page);
+
+/**
+ * fscrypt_encrypt_dio_page() - Encrypts a dio page
+ * @inode:          The inode for which the encryption should take place
+ * @page: The page to encrypt. Must be a dio page.
+ * @len:       Length of data to encrypt in @page and encrypted
+ *             data in returned page.
+ * @offs:      Offset of data within @page and returned
+ *             page holding encrypted data.
+ * @lblk_num:  Logical block number. This must be unique for multiple
+ *             calls with same inode, except when overwriting
+ *             previously written data.
+ * @gfp_flags:      The gfp flag for memory allocation
+ *
+ * Allocates a ciphertext page and encrypts plaintext_page into it using the ctx
+ * encryption context.
+ *
+ * Called on the page write path.  The caller must call
+ * fscrypt_restore_control_page() or fscrypt_pullback_bio_page() on the
+ * returned ciphertext page to release the bounce buffer and the
+ * encryption context.
+ *
+ * Return: An allocated page with the encrypted content on success. Else, an
+ * error value or NULL.
+ *
+ * Note: fscrypt just run well when file system block size is equal to
+ *       PAGE_SIZE now, so this function only can be used in this case now.
+ */
+struct page *fscrypt_encrypt_dio_page(const struct inode *inode,
+				struct page *page,
+				unsigned int len,
+				unsigned int offs,
+				u64 lblk_num, gfp_t gfp_flags)
+{
+	return do_encrypt_page(inode, page, len, offs, lblk_num, gfp_flags);
+}
+EXPORT_SYMBOL(fscrypt_encrypt_dio_page);
 
 /**
  * fscrypt_decrypt_page() - Decrypts a page in-place
@@ -325,6 +372,27 @@ int fscrypt_decrypt_page(const struct inode *inode, struct page *page,
 				      len, offs, GFP_NOFS);
 }
 EXPORT_SYMBOL(fscrypt_decrypt_page);
+
+/**
+ * fscrypt_decrypt_dio_page() - Decrypts a dio page in-place
+ * @page: The page to decrypt. Must be dio page.
+ *
+ * Decrypts page in-place using the ctx encryption context.
+ *
+ * Called from the read completion callback.
+ *
+ * Return: Zero on success, non-zero otherwise.
+ *
+ * Note: fscrypt just run well when file system block size is equal to
+ *       PAGE_SIZE now, so this function only can be used in this case now.
+ */
+int fscrypt_decrypt_dio_page(struct inode *inode, struct page *page,
+			unsigned int len, unsigned int offs, u64 lblk_num)
+{
+	return fscrypt_do_page_crypto(inode, FS_DECRYPT, lblk_num, page, page,
+				      len, offs, GFP_NOFS);
+}
+EXPORT_SYMBOL(fscrypt_decrypt_dio_page);
 
 /*
  * Validate dentries for encrypted directories to make sure we aren't

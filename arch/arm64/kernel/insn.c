@@ -95,7 +95,8 @@ static void __kprobes *patch_map(void *addr, int fixmap)
 
 	if (module && IS_ENABLED(CONFIG_DEBUG_SET_MODULE_RONX))
 		page = vmalloc_to_page(addr);
-	else if (!module && IS_ENABLED(CONFIG_DEBUG_RODATA))
+	else if (!module && (IS_ENABLED(CONFIG_DEBUG_RODATA) ||
+			IS_ENABLED(CONFIG_KERNEL_TEXT_RDONLY)))
 		page = virt_to_page(addr);
 	else
 		return addr;
@@ -110,6 +111,35 @@ static void __kprobes patch_unmap(int fixmap)
 {
 	clear_fixmap(fixmap);
 }
+
+bool __kprobes aarch64_insn_uses_literal(u32 insn)
+{
+        /* ldr/ldrsw (literal), prfm */
+
+        return aarch64_insn_is_ldr_lit(insn) ||
+                aarch64_insn_is_ldrsw_lit(insn) ||
+                aarch64_insn_is_adr_adrp(insn) ||
+                aarch64_insn_is_prfm_lit(insn);
+}
+
+bool __kprobes aarch64_insn_is_branch(u32 insn)
+{
+        /* b, bl, cb*, tb*, b.cond, br, blr */
+
+        return aarch64_insn_is_b_bl_cb_tb(insn) ||
+                aarch64_insn_is_br_blr(insn) ||
+                aarch64_insn_is_ret(insn) ||
+                aarch64_insn_is_bcond(insn);
+}
+
+bool __kprobes aarch64_insn_is_daif_access(u32 insn)
+{
+        /* msr daif, mrs daif, msr daifset, msr daifclr */
+
+        return aarch64_insn_is_rd_wr_daif(insn) ||
+                aarch64_insn_is_set_clr_daif(insn);
+}
+
 /*
  * In ARMv8-A, A64 instructions have a fixed length of 32 bits and are always
  * little-endian.
@@ -146,7 +176,12 @@ static int __kprobes __aarch64_insn_write(void *addr, u32 insn)
 int __kprobes aarch64_insn_write(void *addr, u32 insn)
 {
 	insn = cpu_to_le32(insn);
-	return __aarch64_insn_write(addr, insn);
+#ifdef CONFIG_STRICT_MEMORY_RWX
+        mem_text_write_kernel_word(addr, insn);
+        return 0;
+#else
+        return __aarch64_insn_write(addr, insn);
+#endif
 }
 
 static bool __kprobes __aarch64_insn_hotpatch_safe(u32 insn)

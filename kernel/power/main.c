@@ -18,6 +18,10 @@
 
 #include "power.h"
 
+#ifdef CONFIG_HUAWEI_SLEEPLOG
+#include <linux/proc_fs.h>
+#endif
+
 DEFINE_MUTEX(pm_mutex);
 
 #ifdef CONFIG_PM_SLEEP
@@ -241,7 +245,17 @@ late_initcall(pm_debugfs_init);
 #endif /* CONFIG_DEBUG_FS */
 
 #endif /* CONFIG_PM_SLEEP */
-
+#ifdef CONFIG_HUAWEI_SLEEPLOG
+static int __init pm_proc_init(void)
+{
+    proc_create("suspend_stats", S_IRUGO,
+        (struct proc_dir_entry *)NULL, &suspend_stats_operations);
+    return 0;
+}
+/*lint -e528 -esym(750,*)*/
+late_initcall(pm_proc_init);
+/*lint -e528 +esym(750,*)*/
+#endif
 #ifdef CONFIG_PM_SLEEP_DEBUG
 /*
  * pm_print_times: print time taken by devices to suspend and resume.
@@ -638,6 +652,11 @@ static int __init pm_init(void)
 	int error = pm_start_workqueue();
 	if (error)
 		return error;
+#ifdef CONFIG_HW_SYS_SYNC
+	error = suspend_sync_work_queue_init();
+	if (error)
+		return error;
+#endif
 	hibernate_image_size_init();
 	hibernate_reserved_size_init();
 	power_kobj = kobject_create_and_add("power", NULL);

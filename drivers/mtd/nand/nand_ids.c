@@ -31,9 +31,21 @@ struct nand_flash_dev nand_flash_ids[] = {
 	 * listed by full ID. We list them first so that we can easily identify
 	 * the most specific match.
 	 */
+	{"TC58NYG1S3H 2G 1.8V 8-bit",
+		{ .id = {0x98, 0xaa, 0x90, 0x15, 0x00, 0x00, 0x00, 0x00} },
+		  SZ_2K, SZ_256, SZ_128K, 0, 4, 128, NAND_ECC_INFO(8, SZ_512)},
+	{"MT29F4G08ABBDAHC 4G 3.3V 8-bit",
+		{ .id = {0x2c, 0xac, 0x90, 0x15, 0x00, 0x00, 0x00, 0x00} },
+		  SZ_2K, SZ_512, SZ_128K, 0, 4, 64, NAND_ECC_INFO(4, SZ_512)},
+	{"MT29RZ4B2DZZHGSK 4G 3.3V 8-bit",
+		{ .id = {0x2c, 0xac, 0x90, 0x26, 0x00, 0x00, 0x00, 0x00} },
+		  SZ_4K, SZ_512, SZ_256K, 0, 4, 224, NAND_ECC_INFO(8, SZ_512)},
 	{"TC58NVG2S0F 4G 3.3V 8-bit",
 		{ .id = {0x98, 0xdc, 0x90, 0x26, 0x76, 0x15, 0x01, 0x08} },
 		  SZ_4K, SZ_512, SZ_256K, 0, 8, 224, NAND_ECC_INFO(4, SZ_512) },
+	{"MT29F8G08ABBCAH4 8G 3.3V 8-bit",
+		{ .id = {0x2c, 0xa3, 0x90, 0x26, 0x00, 0x00, 0x00, 0x00} },
+		SZ_4K, SZ_1K, SZ_256K, 0, 4, 224, NAND_ECC_INFO(8, SZ_512)},
 	{"TC58NVG3S0F 8G 3.3V 8-bit",
 		{ .id = {0x98, 0xd3, 0x90, 0x26, 0x76, 0x15, 0x02, 0x08} },
 		  SZ_4K, SZ_1K, SZ_256K, 0, 8, 232, NAND_ECC_INFO(4, SZ_512) },
@@ -50,6 +62,21 @@ struct nand_flash_dev nand_flash_ids[] = {
 		{ .id = {0xad, 0xde, 0x94, 0xda, 0x74, 0xc4} },
 		  SZ_8K, SZ_8K, SZ_2M, 0, 6, 640, NAND_ECC_INFO(40, SZ_1K),
 		  4 },
+	{"KSLCMBL2VA2M2A 2G 1.8V 8-bit",
+		{ .id = {0x98, 0xac, 0x90, 0x26, 0x76, 0x00, 0x00, 0x00} },
+		SZ_4K, SZ_512, SZ_256K, 0, 5, 256, NAND_ECC_INFO(8, SZ_512) },
+
+	{"MT29RZ2B1DZZHGSP 2G  1.8V 4-bit",
+		{ .id = {0x2c, 0xaa, 0x90, 0x15, 0x00, 0x00, 0x00, 0x00} },
+		SZ_2K, SZ_256, SZ_128K, 0, 4, 64, NAND_ECC_INFO(4, SZ_512) },
+
+	{"KSLCMAL2TA0M2A 2G 1.8V 8-bit",
+		{ .id = {0x98, 0xaa, 0x90, 0x15, 0x00, 0x00, 0x00, 0x00} },
+		SZ_2K, SZ_256, SZ_128K, 0, 4, 128, NAND_ECC_INFO(8, SZ_512)},
+
+	{"MX63U1GC12HAXMI01 1G 1.8V 4-bit",
+		{ .id = {0xc2, 0xa1, 0x80, 0x15, 0x00, 0x00, 0x00, 0x00} },
+		SZ_2K, SZ_128, SZ_128K, 0, 4, 64, NAND_ECC_INFO(4, SZ_512)},
 
 	LEGACY_ID_NAND("NAND 4MiB 5V 8-bit",   0x6B, 4, SZ_8K, SP_OPTIONS),
 	LEGACY_ID_NAND("NAND 4MiB 3,3V 8-bit", 0xE3, 4, SZ_8K, SP_OPTIONS),

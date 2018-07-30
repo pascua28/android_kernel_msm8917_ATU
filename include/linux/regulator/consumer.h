@@ -96,11 +96,14 @@ struct regmap;
  * FORCE_DISABLE  Regulator forcibly shut down by software.
  * VOLTAGE_CHANGE Regulator voltage changed.
  *                Data passed is old voltage cast to (void *).
+ * ENABLE         Regulator was enabled.
  * DISABLE        Regulator was disabled.
  * PRE_VOLTAGE_CHANGE   Regulator is about to have voltage changed.
  *                      Data passed is "struct pre_voltage_change_data"
  * ABORT_VOLTAGE_CHANGE Regulator voltage change failed for some reason.
  *                      Data passed is old voltage cast to (void *).
+ * PRE_DISABLE    Regulator is about to be disabled
+ * ABORT_DISABLE  Regulator disable failed for some reason
  *
  * NOTE: These events can be OR'ed together when passed into handler.
  */
@@ -115,6 +118,8 @@ struct regmap;
 #define REGULATOR_EVENT_DISABLE 		0x80
 #define REGULATOR_EVENT_PRE_VOLTAGE_CHANGE	0x100
 #define REGULATOR_EVENT_ABORT_VOLTAGE_CHANGE	0x200
+#define REGULATOR_EVENT_PRE_DISABLE		0x400
+#define REGULATOR_EVENT_ABORT_DISABLE		0x800
 
 /**
  * struct pre_voltage_change_data - Data sent with PRE_VOLTAGE_CHANGE event
@@ -128,6 +133,7 @@ struct pre_voltage_change_data {
 	unsigned long min_uV;
 	unsigned long max_uV;
 };
+#define REGULATOR_EVENT_ENABLE			0x80000000
 
 struct regulator;
 
@@ -138,6 +144,10 @@ struct regulator;
  *            using the bulk regulator APIs.
  * @consumer: The regulator consumer for the supply.  This will be managed
  *            by the bulk API.
+ * @min_uV:   The minimum requested voltage for the regulator (in microvolts),
+ *            or 0 to not set a voltage.
+ * @max_uV:   The maximum requested voltage for the regulator (in microvolts),
+ *            or 0 to use @min_uV.
  *
  * The regulator APIs provide a series of regulator_bulk_() API calls as
  * a convenience to consumers which require multiple supplies.  This
@@ -146,6 +156,8 @@ struct regulator;
 struct regulator_bulk_data {
 	const char *supply;
 	struct regulator *consumer;
+	int min_uV;
+	int max_uV;
 
 	/* private: Internal use */
 	int ret;
@@ -210,6 +222,8 @@ int __must_check devm_regulator_bulk_get(struct device *dev, int num_consumers,
 					 struct regulator_bulk_data *consumers);
 int __must_check regulator_bulk_enable(int num_consumers,
 				       struct regulator_bulk_data *consumers);
+int regulator_bulk_set_voltage(int num_consumers,
+			  struct regulator_bulk_data *consumers);
 int regulator_bulk_disable(int num_consumers,
 			   struct regulator_bulk_data *consumers);
 int regulator_bulk_force_disable(int num_consumers,
@@ -220,6 +234,7 @@ void regulator_bulk_free(int num_consumers,
 int regulator_can_change_voltage(struct regulator *regulator);
 int regulator_count_voltages(struct regulator *regulator);
 int regulator_list_voltage(struct regulator *regulator, unsigned selector);
+int regulator_list_corner_voltage(struct regulator *regulator, int corner);
 int regulator_is_supported_voltage(struct regulator *regulator,
 				   int min_uV, int max_uV);
 unsigned int regulator_get_linear_step(struct regulator *regulator);
@@ -531,7 +546,23 @@ static inline int regulator_count_voltages(struct regulator *regulator)
 {
 	return 0;
 }
+
+static inline int regulator_list_corner_voltage(struct regulator *regulator,
+	int corner)
+{
+	return -EINVAL;
+}
 #endif
+
+static inline int regulator_set_voltage_triplet(struct regulator *regulator,
+						int min_uV, int target_uV,
+						int max_uV)
+{
+	if (regulator_set_voltage(regulator, target_uV, max_uV) == 0)
+		return 0;
+
+	return regulator_set_voltage(regulator, min_uV, max_uV);
+}
 
 static inline int regulator_set_voltage_tol(struct regulator *regulator,
 					    int new_uV, int tol_uV)

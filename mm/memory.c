@@ -71,6 +71,10 @@
 
 #include "internal.h"
 
+#ifdef CONFIG_HW_MEMORY_MONITOR
+#include <chipset_common/mmonitor/mmonitor.h>
+#endif
+
 #ifdef LAST_CPUPID_NOT_IN_PAGE_FLAGS
 #warning Unfortunate NUMA and NUMA Balancing config, growing page-frame for last_cpupid.
 #endif
@@ -2430,6 +2434,11 @@ static int do_swap_page(struct mm_struct *mm, struct vm_area_struct *vma,
 		goto out;
 	}
 	delayacct_set_flag(DELAYACCT_PF_SWAPIN);
+#ifdef CONFIG_HW_MEMORY_MONITOR
+	if (current->delays)
+		__delayacct_blkio_start();
+	count_mmonitor_event(FILE_CACHE_MAP_COUNT);
+#endif
 	page = lookup_swap_cache(entry);
 	if (!page) {
 		page = swapin_readahead(entry,
@@ -2442,6 +2451,10 @@ static int do_swap_page(struct mm_struct *mm, struct vm_area_struct *vma,
 			page_table = pte_offset_map_lock(mm, pmd, address, &ptl);
 			if (likely(pte_same(*page_table, orig_pte)))
 				ret = VM_FAULT_OOM;
+#ifdef CONFIG_HW_MEMORY_MONITOR
+			if (current->delays)
+				__delayacct_blkio_end();
+#endif
 			delayacct_clear_flag(DELAYACCT_PF_SWAPIN);
 			goto unlock;
 		}
@@ -2456,6 +2469,10 @@ static int do_swap_page(struct mm_struct *mm, struct vm_area_struct *vma,
 		 * owner processes (which may be unknown at hwpoison time)
 		 */
 		ret = VM_FAULT_HWPOISON;
+#ifdef CONFIG_HW_MEMORY_MONITOR
+		if (current->delays)
+			__delayacct_blkio_end();
+#endif
 		delayacct_clear_flag(DELAYACCT_PF_SWAPIN);
 		swapcache = page;
 		goto out_release;
@@ -2463,7 +2480,10 @@ static int do_swap_page(struct mm_struct *mm, struct vm_area_struct *vma,
 
 	swapcache = page;
 	locked = lock_page_or_retry(page, mm, flags);
-
+#ifdef CONFIG_HW_MEMORY_MONITOR
+	if (current->delays)
+		__delayacct_blkio_end();
+#endif
 	delayacct_clear_flag(DELAYACCT_PF_SWAPIN);
 	if (!locked) {
 		ret |= VM_FAULT_RETRY;
@@ -2536,7 +2556,8 @@ static int do_swap_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	}
 
 	swap_free(entry);
-	if (vm_swap_full() || (vma->vm_flags & VM_LOCKED) || PageMlocked(page))
+	if ((PageSwapCache(page) && vm_swap_full(page_swap_info(page))) ||
+		(vma->vm_flags & VM_LOCKED) || PageMlocked(page))
 		try_to_free_swap(page);
 	unlock_page(page);
 	if (page != swapcache) {
@@ -2731,7 +2752,7 @@ void do_set_pte(struct vm_area_struct *vma, unsigned long address,
 }
 
 static unsigned long fault_around_bytes __read_mostly =
-	rounddown_pow_of_two(65536);
+	rounddown_pow_of_two(4096);
 
 #ifdef CONFIG_DEBUG_FS
 static int fault_around_bytes_get(void *data, u64 *val)
@@ -3793,4 +3814,8 @@ void ptlock_free(struct page *page)
 {
 	kmem_cache_free(page_ptl_cachep, page->ptl);
 }
+#endif
+
+#ifdef CONFIG_HUAWEI_BOOST_SIGKILL_FREE
+#include "boost_sigkill_free.c"
 #endif

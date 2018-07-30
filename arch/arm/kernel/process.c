@@ -14,6 +14,7 @@
 #include <linux/sched.h>
 #include <linux/kernel.h>
 #include <linux/mm.h>
+#include <linux/vmalloc.h>
 #include <linux/stddef.h>
 #include <linux/unistd.h>
 #include <linux/user.h>
@@ -171,7 +172,8 @@ void (*arm_pm_restart)(enum reboot_mode reboot_mode, const char *cmd);
  * This is our default idle handler.
  */
 
-void (*arm_pm_idle)(void);
+extern void arch_idle(void);
+void (*arm_pm_idle)(void) = arch_idle;
 
 /*
  * Called from the core idle loop.
@@ -311,10 +313,12 @@ static void show_data(unsigned long addr, int nbytes, const char *name)
 	u32	*p;
 
 	/*
-	 * don't attempt to dump non-kernel addresses or
-	 * values that are probably just small negative numbers
+	 * don't attempt to dump non-kernel addresses, values that are probably
+	 * just small negative numbers, or vmalloc addresses that may point to
+	 * memory-mapped peripherals
 	 */
-	if (addr < PAGE_OFFSET || addr > -256UL)
+	if (addr < PAGE_OFFSET || addr > -256UL ||
+	    is_vmalloc_addr((void *)addr))
 		return;
 
 	printk("\n%s: %#lx:\n", name, addr);
@@ -336,7 +340,8 @@ static void show_data(unsigned long addr, int nbytes, const char *name)
 		printk("%04lx ", (unsigned long)p & 0xffff);
 		for (j = 0; j < 8; j++) {
 			u32	data;
-			if (probe_kernel_address(p, data)) {
+			if (!virt_addr_valid(p) ||
+			    probe_kernel_address(p, data)) {
 				printk(" ********");
 			} else {
 				printk(" %08x", data);
@@ -349,10 +354,6 @@ static void show_data(unsigned long addr, int nbytes, const char *name)
 
 static void show_extra_register_data(struct pt_regs *regs, int nbytes)
 {
-	mm_segment_t fs;
-
-	fs = get_fs();
-	set_fs(KERNEL_DS);
 	show_data(regs->ARM_pc - nbytes, nbytes * 2, "PC");
 	show_data(regs->ARM_lr - nbytes, nbytes * 2, "LR");
 	show_data(regs->ARM_sp - nbytes, nbytes * 2, "SP");
@@ -369,7 +370,6 @@ static void show_extra_register_data(struct pt_regs *regs, int nbytes)
 	show_data(regs->ARM_r8 - nbytes, nbytes * 2, "R8");
 	show_data(regs->ARM_r9 - nbytes, nbytes * 2, "R9");
 	show_data(regs->ARM_r10 - nbytes, nbytes * 2, "R10");
-	set_fs(fs);
 }
 
 void __show_regs(struct pt_regs *regs)
@@ -456,8 +456,8 @@ void __show_regs(struct pt_regs *regs)
 		printk("Control: %08x%s\n", ctrl, buf);
 	}
 #endif
-
-	show_extra_register_data(regs, 128);
+	if (get_fs() == get_ds())
+		show_extra_register_data(regs, 128);
 }
 
 void show_regs(struct pt_regs * regs)

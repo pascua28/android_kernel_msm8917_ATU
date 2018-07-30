@@ -2346,6 +2346,10 @@ int __audit_signal_info(int sig, struct task_struct *t)
 
 	/* optimize the common case by putting first signal recipient directly
 	 * in audit_context */
+	if(!ctx){
+		printk(KERN_ERR"invalid arg for tsk->audit_context \n");
+		return 0;
+	}
 	if (!ctx->target_pid) {
 		ctx->target_pid = task_tgid_nr(t);
 		ctx->target_auid = audit_get_loginuid(t);

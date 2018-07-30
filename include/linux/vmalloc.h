@@ -7,6 +7,10 @@
 #include <asm/page.h>		/* pgprot_t */
 #include <linux/rbtree.h>
 
+#ifdef CONFIG_DEBUG_VMALLOC
+#include <linux/sched.h>
+#endif
+
 struct vm_area_struct;		/* vma defining user mapping in mm_types.h */
 
 /* bits in flags of vmalloc's vm_struct below */
@@ -16,6 +20,10 @@ struct vm_area_struct;		/* vma defining user mapping in mm_types.h */
 #define VM_USERMAP		0x00000008	/* suitable for remap_vmalloc_range */
 #define VM_VPAGES		0x00000010	/* buffer for pages was vmalloc'ed */
 #define VM_UNINITIALIZED	0x00000020	/* vm_struct is not fully initialized */
+#define VM_NO_GUARD		0x00000040      /* don't add guard page */
+#define VM_KASAN		0x00000080      /* has allocated kasan shadow memory */
+#define VM_LOWMEM		0x00000100	/* Tracking of direct mapped lowmem */
+
 /* bits [20..32] reserved for arch specific ioremap internals */
 
 /*
@@ -35,6 +43,10 @@ struct vm_struct {
 	unsigned int		nr_pages;
 	phys_addr_t		phys_addr;
 	const void		*caller;
+#ifdef CONFIG_DEBUG_VMALLOC
+	unsigned int	pid;
+	unsigned char	task_name[TASK_COMM_LEN];
+#endif
 };
 
 struct vmap_area {
@@ -75,7 +87,9 @@ extern void *vmalloc_32_user(unsigned long size);
 extern void *__vmalloc(unsigned long size, gfp_t gfp_mask, pgprot_t prot);
 extern void *__vmalloc_node_range(unsigned long size, unsigned long align,
 			unsigned long start, unsigned long end, gfp_t gfp_mask,
-			pgprot_t prot, int node, const void *caller);
+			pgprot_t prot, unsigned long vm_flags, int node,
+			const void *caller);
+
 extern void vfree(const void *addr);
 
 extern void *vmap(struct page **pages, unsigned int count,
@@ -96,8 +110,12 @@ void vmalloc_sync_all(void);
 
 static inline size_t get_vm_area_size(const struct vm_struct *area)
 {
-	/* return actual size without guard page */
-	return area->size - PAGE_SIZE;
+	if (!(area->flags & VM_NO_GUARD))
+		/* return actual size without guard page */
+		return area->size - PAGE_SIZE;
+	else
+		return area->size;
+
 }
 
 extern struct vm_struct *get_vm_area(unsigned long size, unsigned long flags);
@@ -150,6 +168,13 @@ extern long vwrite(char *buf, char *addr, unsigned long count);
 extern struct list_head vmap_area_list;
 extern __init void vm_area_add_early(struct vm_struct *vm);
 extern __init void vm_area_register_early(struct vm_struct *vm, size_t align);
+extern __init int vm_area_check_early(struct vm_struct *vm);
+#ifdef CONFIG_ENABLE_VMALLOC_SAVING
+extern void mark_vmalloc_reserved_area(void *addr, unsigned long size);
+#else
+static inline void mark_vmalloc_reserved_area(void *addr, unsigned long size)
+{ };
+#endif
 
 #ifdef CONFIG_SMP
 # ifdef CONFIG_MMU
@@ -180,7 +205,12 @@ struct vmalloc_info {
 };
 
 #ifdef CONFIG_MMU
+#ifdef CONFIG_ENABLE_VMALLOC_SAVING
+extern unsigned long total_vmalloc_size;
+#define VMALLOC_TOTAL total_vmalloc_size
+#else
 #define VMALLOC_TOTAL (VMALLOC_END - VMALLOC_START)
+#endif
 extern void get_vmalloc_info(struct vmalloc_info *vmi);
 #else
 

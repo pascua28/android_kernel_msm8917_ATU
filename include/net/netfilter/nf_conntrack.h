@@ -17,6 +17,7 @@
 #include <linux/bitops.h>
 #include <linux/compiler.h>
 #include <linux/atomic.h>
+#include <linux/list.h>
 
 #include <linux/netfilter/nf_conntrack_tcp.h>
 #include <linux/netfilter/nf_conntrack_dccp.h>
@@ -25,6 +26,15 @@
 #include <net/netfilter/ipv6/nf_conntrack_icmpv6.h>
 
 #include <net/netfilter/nf_conntrack_tuple.h>
+
+#define SIP_LIST_ELEMENTS	2
+
+struct sip_length {
+	int msg_length[SIP_LIST_ELEMENTS];
+	int skb_len[SIP_LIST_ELEMENTS];
+	int data_len[SIP_LIST_ELEMENTS];
+	int orig_data_len[SIP_LIST_ELEMENTS];
+};
 
 /* per conntrack: protocol private data */
 union nf_conntrack_proto {
@@ -71,6 +81,11 @@ struct nf_conn_help {
 #include <net/netfilter/ipv4/nf_conntrack_ipv4.h>
 #include <net/netfilter/ipv6/nf_conntrack_ipv6.h>
 
+/* Handle NATTYPE Stuff,only if NATTYPE module was defined */
+#if defined(CONFIG_IP_NF_TARGET_NATTYPE_MODULE)
+#include <linux/netfilter_ipv4/ipt_NATTYPE.h>
+#endif
+
 struct nf_conn {
 	/* Usage count in here is 1 for hash table/destruct timer, 1 per skb,
 	 * plus 1 for any connection(s) we are `master' for
@@ -111,6 +126,19 @@ struct nf_conn {
 #ifdef CONFIG_NET_NS
 	struct net *ct_net;
 #endif
+
+#if defined(CONFIG_IP_NF_TARGET_NATTYPE_MODULE)
+	unsigned long nattype_entry;
+#endif
+
+	struct list_head sip_segment_list;
+	const char *dptr_prev;
+	bool dir_prev;
+	struct sip_length segment;
+	bool sip_original_dir;
+	bool sip_reply_dir;
+
+	void *sfe_entry;
 
 	/* Storage reserved for other modules, must be the last member */
 	union nf_conntrack_proto proto;
@@ -289,6 +317,8 @@ int nf_conntrack_set_hashsize(const char *val, struct kernel_param *kp);
 extern unsigned int nf_conntrack_htable_size;
 extern unsigned int nf_conntrack_max;
 extern unsigned int nf_conntrack_hash_rnd;
+extern unsigned int nf_conntrack_pkt_threshold;
+
 void init_nf_conntrack_hash_rnd(void);
 
 void nf_conntrack_tmpl_insert(struct net *net, struct nf_conn *tmpl);

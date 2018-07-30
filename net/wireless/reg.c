@@ -415,6 +415,11 @@ static bool is_user_regdom_saved(void)
 	return true;
 }
 
+static bool is_cfg80211_regdom_intersected(void)
+{
+	return is_intersected_alpha2(get_cfg80211_regdom()->alpha2);
+}
+
 static const struct ieee80211_regdomain *
 reg_copy_regd(const struct ieee80211_regdomain *src_regd)
 {
@@ -1123,8 +1128,12 @@ static void handle_channel(struct wiphy *wiphy,
 	if (reg_rule->flags & NL80211_RRF_AUTO_BW)
 		max_bandwidth_khz = reg_get_max_bandwidth(regd, reg_rule);
 
+	if (max_bandwidth_khz < MHZ_TO_KHZ(10))
+		bw_flags |= IEEE80211_CHAN_NO_10MHZ;
+	if (max_bandwidth_khz < MHZ_TO_KHZ(20))
+		bw_flags |= IEEE80211_CHAN_NO_20MHZ;
 	if (max_bandwidth_khz < MHZ_TO_KHZ(40))
-		bw_flags = IEEE80211_CHAN_NO_HT40;
+		bw_flags |= IEEE80211_CHAN_NO_HT40;
 	if (max_bandwidth_khz < MHZ_TO_KHZ(80))
 		bw_flags |= IEEE80211_CHAN_NO_80MHZ;
 	if (max_bandwidth_khz < MHZ_TO_KHZ(160))
@@ -1558,8 +1567,12 @@ static void handle_channel_custom(struct wiphy *wiphy,
 	if (reg_rule->flags & NL80211_RRF_AUTO_BW)
 		max_bandwidth_khz = reg_get_max_bandwidth(regd, reg_rule);
 
+	if (max_bandwidth_khz < MHZ_TO_KHZ(10))
+		bw_flags |= IEEE80211_CHAN_NO_10MHZ;
+	if (max_bandwidth_khz < MHZ_TO_KHZ(20))
+		bw_flags |= IEEE80211_CHAN_NO_20MHZ;
 	if (max_bandwidth_khz < MHZ_TO_KHZ(40))
-		bw_flags = IEEE80211_CHAN_NO_HT40;
+		bw_flags |= IEEE80211_CHAN_NO_HT40;
 	if (max_bandwidth_khz < MHZ_TO_KHZ(80))
 		bw_flags |= IEEE80211_CHAN_NO_80MHZ;
 	if (max_bandwidth_khz < MHZ_TO_KHZ(160))
@@ -1681,9 +1694,14 @@ __reg_process_hint_user(struct regulatory_request *user_request)
 	 */
 	if ((lr->initiator == NL80211_REGDOM_SET_BY_CORE ||
 	     lr->initiator == NL80211_REGDOM_SET_BY_DRIVER ||
-	     lr->initiator == NL80211_REGDOM_SET_BY_USER) &&
-	    regdom_changes(lr->alpha2))
-		return REG_REQ_IGNORE;
+	     lr->initiator == NL80211_REGDOM_SET_BY_USER)) {
+		if (lr->intersect) {
+			if (!is_cfg80211_regdom_intersected())
+				return REG_REQ_IGNORE;
+		} else if (regdom_changes(lr->alpha2)) {
+			return REG_REQ_IGNORE;
+		}
+	}
 
 	if (!regdom_changes(user_request->alpha2))
 		return REG_REQ_ALREADY_SET;
@@ -1729,22 +1747,14 @@ __reg_process_hint_driver(struct regulatory_request *driver_request)
 {
 	struct regulatory_request *lr = get_last_request();
 
-	if (lr->initiator == NL80211_REGDOM_SET_BY_CORE) {
-		if (regdom_changes(driver_request->alpha2))
-			return REG_REQ_OK;
-		return REG_REQ_ALREADY_SET;
-	}
-
-	/*
-	 * This would happen if you unplug and plug your card
-	 * back in or if you add a new device for which the previously
-	 * loaded card also agrees on the regulatory domain.
-	 */
-	if (lr->initiator == NL80211_REGDOM_SET_BY_DRIVER &&
-	    !regdom_changes(driver_request->alpha2))
+	if (!regdom_changes(driver_request->alpha2))
 		return REG_REQ_ALREADY_SET;
 
-	return REG_REQ_INTERSECT;
+	if (lr->initiator == NL80211_REGDOM_SET_BY_USER)
+		return REG_REQ_INTERSECT;
+	else
+		return REG_REQ_OK;
+
 }
 
 /**
@@ -2062,6 +2072,7 @@ int regulatory_hint_user(const char *alpha2,
 
 	return 0;
 }
+EXPORT_SYMBOL(regulatory_hint_user);
 
 int regulatory_hint_indoor_user(void)
 {

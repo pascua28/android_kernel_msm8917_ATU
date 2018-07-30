@@ -263,12 +263,15 @@ out:
  *
  * Returns zero on success; non-zero on error condition
  */
+
+
 static int
 ecryptfs_create(struct inode *directory_inode, struct dentry *ecryptfs_dentry,
 		umode_t mode, bool excl)
 {
 	struct inode *ecryptfs_inode;
 	int rc;
+	struct ecryptfs_crypt_stat *crypt_stat;
 
 	ecryptfs_inode = ecryptfs_do_create(directory_inode, ecryptfs_dentry,
 					    mode);
@@ -278,6 +281,7 @@ ecryptfs_create(struct inode *directory_inode, struct dentry *ecryptfs_dentry,
 		rc = PTR_ERR(ecryptfs_inode);
 		goto out;
 	}
+
 	/* At this point, a file exists on "disk"; we need to make sure
 	 * that this on disk file is prepared to be an ecryptfs file */
 	rc = ecryptfs_initialize_file(ecryptfs_dentry, ecryptfs_inode);
@@ -290,6 +294,13 @@ ecryptfs_create(struct inode *directory_inode, struct dentry *ecryptfs_dentry,
 		goto out;
 	}
 	unlock_new_inode(ecryptfs_inode);
+
+	crypt_stat = &ecryptfs_inode_to_private(ecryptfs_inode)->crypt_stat;
+	if (get_events() && get_events()->open_cb)
+			get_events()->open_cb(
+				ecryptfs_inode_to_lower(ecryptfs_inode),
+					crypt_stat);
+
 	d_instantiate(ecryptfs_dentry, ecryptfs_inode);
 out:
 	return rc;
@@ -680,7 +691,7 @@ static void *ecryptfs_follow_link(struct dentry *dentry, struct nameidata *nd)
 {
 	size_t len;
 	char *buf = ecryptfs_readlink_lower(dentry, &len);
-	if (IS_ERR(buf))
+	if (IS_ERR(buf) || NULL == buf)
 		goto out;
 	fsstack_copy_attr_atime(dentry->d_inode,
 				ecryptfs_dentry_to_lower(dentry)->d_inode);

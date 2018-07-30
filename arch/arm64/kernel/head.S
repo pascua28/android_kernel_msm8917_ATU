@@ -206,7 +206,7 @@ section_table:
 	.align 12
 #endif
 
-ENTRY(stext)
+ENTRY_NOTAG(stext)
 	bl	preserve_boot_args
 	bl	el2_setup			// Drop to EL1, w20=cpu_boot_mode
 	adrp	x24, __PHYS_OFFSET
@@ -463,6 +463,9 @@ __mmap_switched:
 	str_l	x21, __fdt_pointer, x5		// Save FDT pointer
 	str_l	x24, memstart_addr, x6		// Save PHYS_OFFSET
 	mov	x29, #0
+#ifdef CONFIG_KASAN
+	bl	kasan_early_init
+#endif
 	b	start_kernel
 ENDPROC(__mmap_switched)
 
@@ -587,7 +590,7 @@ ENDPROC(set_cpu_boot_mode_flag)
  * zeroing of .bss would clobber it.
  */
 	.pushsection	.data..cacheline_aligned
-ENTRY(__boot_cpu_mode)
+ENTRY_NOTAG(__boot_cpu_mode)
 	.align	L1_CACHE_SHIFT
 	.long	BOOT_CPU_MODE_EL2
 	.long	0
@@ -601,7 +604,7 @@ ENTRY(__boot_cpu_mode)
 	 * This provides a "holding pen" for platforms to hold all secondary
 	 * cores are held until we're ready for them to initialise.
 	 */
-ENTRY(secondary_holding_pen)
+ENTRY_NOTAG(secondary_holding_pen)
 	bl	el2_setup			// Drop to EL1, w20=cpu_boot_mode
 	bl	set_cpu_boot_mode_flag
 	mrs	x0, mpidr_el1
@@ -611,7 +614,6 @@ ENTRY(secondary_holding_pen)
 pen:	ldr	x4, [x3]
 	cmp	x4, x0
 	b.eq	secondary_startup
-	wfe
 	b	pen
 ENDPROC(secondary_holding_pen)
 

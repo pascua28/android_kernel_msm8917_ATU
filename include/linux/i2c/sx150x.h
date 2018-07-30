@@ -11,11 +11,6 @@
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
- * 02110-1301, USA.
  */
 #ifndef __LINUX_I2C_SX150X_H
 #define __LINUX_I2C_SX150X_H
@@ -77,6 +72,9 @@ struct sx150x_platform_data {
 	int      irq_summary;
 	unsigned irq_base;
 	bool     reset_during_probe;
+	struct regulator	*vdd_in;
+	int     vdd_in_minv;
+	int     vdd_in_maxv;
 };
 
 #endif /* __LINUX_I2C_SX150X_H */

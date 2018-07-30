@@ -36,6 +36,15 @@
 #include <linux/cleancache.h>
 #include <linux/rmap.h>
 #include "internal.h"
+#include <linux/iolimit_cgroup.h>
+
+#ifdef CONFIG_TASK_PROTECT_LRU
+#include <linux/protect_lru.h>
+#endif
+
+#ifdef CONFIG_HW_MEMORY_MONITOR
+#include <chipset_common/mmonitor/mmonitor.h>
+#endif
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/filemap.h>
@@ -187,10 +196,12 @@ void __delete_from_page_cache(struct page *page, void *shadow)
 	 * invalidate any existing cleancache entries.  We can't leave
 	 * stale data around in the cleancache once our page is gone
 	 */
-	if (PageUptodate(page) && PageMappedToDisk(page))
+	if (PageUptodate(page) && PageMappedToDisk(page)) {
+		count_vm_event(PGPGOUTCLEAN);
 		cleancache_put_page(page);
-	else
+	} else {
 		cleancache_invalidate_page(mapping, page);
+	}
 
 	page_cache_tree_delete(mapping, page, shadow);
 
@@ -633,6 +644,9 @@ int add_to_page_cache_lru(struct page *page, struct address_space *mapping,
 			workingset_activation(page);
 		} else
 			ClearPageActive(page);
+#ifdef CONFIG_TASK_PROTECT_LRU
+		protect_lru_set_from_file(page);
+#endif
 		lru_cache_add(page);
 	}
 	return ret;
@@ -1127,7 +1141,11 @@ no_page:
 		}
 	}
 
+#ifdef CONFIG_TASK_PROTECT_LRU
+	return protect_lru_move_and_shrink(page);
+#else
 	return page;
+#endif
 }
 EXPORT_SYMBOL(pagecache_get_page);
 
@@ -1486,9 +1504,18 @@ static ssize_t do_generic_file_read(struct file *filp, loff_t *ppos,
 		unsigned long nr, ret;
 
 		cond_resched();
+#ifdef CONFIG_CGROUP_IOLIMIT
+		io_read_bandwidth_control(PAGE_CACHE_SIZE);
+#endif
 find_page:
 		page = find_get_page(mapping, index);
+#ifdef CONFIG_HW_MEMORY_MONITOR
+		count_mmonitor_event(FILE_CACHE_READ_COUNT);
+#endif
 		if (!page) {
+#ifdef CONFIG_HW_MEMORY_MONITOR
+			count_mmonitor_event(FILE_CACHE_MISS_COUNT);
+#endif
 			page_cache_sync_readahead(mapping,
 					ra, filp,
 					index, last_index - index);
@@ -1883,15 +1910,22 @@ int filemap_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 	 * Do we have something in the page cache already?
 	 */
 	page = find_get_page(mapping, offset);
+#ifdef CONFIG_HW_MEMORY_MONITOR
+	count_mmonitor_event(FILE_CACHE_MAP_COUNT);
+#endif
 	if (likely(page) && !(vmf->flags & FAULT_FLAG_TRIED)) {
 		/*
 		 * We found the page, so try async readahead before
 		 * waiting for the lock.
 		 */
+		task_set_in_pagefault(current);
 		do_async_mmap_readahead(vma, ra, file, page, offset);
+		task_clear_in_pagefault(current);
 	} else if (!page) {
 		/* No page in the page cache at all */
+		task_set_in_pagefault(current);
 		do_sync_mmap_readahead(vma, ra, file, offset);
+		task_clear_in_pagefault(current);
 		count_vm_event(PGMAJFAULT);
 		mem_cgroup_count_vm_event(vma->vm_mm, PGMAJFAULT);
 		ret = VM_FAULT_MAJOR;
@@ -1940,7 +1974,9 @@ no_cached_page:
 	 * We're only likely to ever get here if MADV_RANDOM is in
 	 * effect.
 	 */
+	task_set_in_pagefault(current);
 	error = page_cache_read(file, offset);
+	task_clear_in_pagefault(current);
 
 	/*
 	 * The page we want has now been added to the page cache.
@@ -1967,7 +2003,9 @@ page_not_uptodate:
 	 * and we need to check for errors.
 	 */
 	ClearPageError(page);
+	task_set_in_pagefault(current);
 	error = mapping->a_ops->readpage(file, page);
+	task_clear_in_pagefault(current);
 	if (!error) {
 		wait_on_page_locked(page);
 		if (!PageUptodate(page))
@@ -2468,7 +2506,9 @@ ssize_t generic_perform_write(struct file *file,
 		unsigned long bytes;	/* Bytes to write to page */
 		size_t copied;		/* Bytes copied from user */
 		void *fsdata;
-
+#ifdef CONFIG_CGROUP_IOLIMIT
+		io_write_bandwidth_control(PAGE_CACHE_SIZE);
+#endif
 		offset = (pos & (PAGE_CACHE_SIZE - 1));
 		bytes = min_t(unsigned long, PAGE_CACHE_SIZE - offset,
 						iov_iter_count(i));

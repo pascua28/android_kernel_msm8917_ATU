@@ -16,6 +16,7 @@
 #include <asm/uaccess.h>
 #include <asm/page.h>
 
+#define PAGE_ALLOC_COUNT    4
 
 /*
  * seq_files have a buffer which can may overflow. When this happens a larger
@@ -36,9 +37,23 @@ static void *seq_buf_alloc(unsigned long size)
 {
 	void *buf;
 
-	buf = kmalloc(size, GFP_KERNEL | __GFP_NOWARN);
-	if (!buf && size > PAGE_SIZE)
+	gfp_t gfp = GFP_KERNEL;
+
+	/*
+	 * use vmalloc allocations directly for more than 16KB size.
+	 */
+	if (size > PAGE_ALLOC_COUNT * PAGE_SIZE) {
 		buf = vmalloc(size);
+	} else  {
+		if (size > PAGE_SIZE)
+			gfp |= __GFP_NORETRY | __GFP_NOWARN;
+
+		buf = kmalloc(size, gfp);
+
+		if (!buf && size > PAGE_SIZE)
+			buf = vmalloc(size);
+	}
+
 	return buf;
 }
 

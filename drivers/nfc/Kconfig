@@ -3,7 +3,7 @@
 #
 
 menu "Near Field Communication (NFC) devices"
-	depends on NFC
+#	depends on NFC
 
 config NFC_PN533
 	tristate "NXP PN533 USB driver"
@@ -68,9 +68,23 @@ config NFC_PORT100
 
 	  If unsure, say N.
 
+config NFC_PN547
+	tristate "PN547 NFC driver"
+	depends on I2C
+	help
+	  NXP PN547 driver.
+
 source "drivers/nfc/pn544/Kconfig"
 source "drivers/nfc/microread/Kconfig"
 source "drivers/nfc/nfcmrvl/Kconfig"
 source "drivers/nfc/st21nfca/Kconfig"
 source "drivers/nfc/st21nfcb/Kconfig"
 endmenu
+
+config NFC_NQ
+	tristate "Qualcomm NCI based NFC Controller Driver for NQx"
+	depends on I2C
+	help
+	  This enables the NFC driver for NQx based devices.
+	  This is for i2c connected version. NCI protocol logic
+	  resides in the usermode and it has no other NFC dependencies.

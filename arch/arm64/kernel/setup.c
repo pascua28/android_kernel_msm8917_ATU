@@ -43,6 +43,7 @@
 #include <linux/of_platform.h>
 #include <linux/efi.h>
 #include <linux/personality.h>
+#include <linux/dma-mapping.h>
 
 #include <asm/fixmap.h>
 #include <asm/cpu.h>
@@ -50,6 +51,7 @@
 #include <asm/elf.h>
 #include <asm/cpufeature.h>
 #include <asm/cpu_ops.h>
+#include <asm/kasan.h>
 #include <asm/sections.h>
 #include <asm/setup.h>
 #include <asm/smp_plat.h>
@@ -60,7 +62,37 @@
 #include <asm/psci.h>
 #include <asm/efi.h>
 
+#ifdef CONFIG_DUMP_SYS_INFO
+#include <linux/module.h>
+#include <linux/srecorder.h>
+#endif
+
+char* (*arch_read_hardware_id)(void);
+EXPORT_SYMBOL(arch_read_hardware_id);
+
+unsigned int boot_reason;
+EXPORT_SYMBOL(boot_reason);
+
+unsigned int cold_boot;
+EXPORT_SYMBOL(cold_boot);
+
+static const char *machine_name;
 phys_addr_t __fdt_pointer __initdata;
+
+#ifdef CONFIG_DUMP_SYS_INFO
+/*
+unsigned long get_cpu_name(void)
+{
+    return (unsigned long)&cpu_name;
+}
+EXPORT_SYMBOL(get_cpu_name);
+*/
+unsigned long get_machine_name(void)
+{
+    return (unsigned long)&machine_name;
+}
+EXPORT_SYMBOL(get_machine_name);
+#endif
 
 /*
  * Standard memory resources
@@ -195,27 +227,13 @@ static void __init setup_machine_fdt(phys_addr_t dt_phys)
 			cpu_relax();
 	}
 
-	dump_stack_set_arch_desc("%s (DT)", of_flat_dt_get_machine_name());
+	machine_name = of_flat_dt_get_machine_name();
+	if (machine_name) {
+		dump_stack_set_arch_desc("%s (DT)", machine_name);
+		pr_info("Machine: %s\n", machine_name);
+	}
+
 }
-
-/*
- * Limit the memory size that was specified via FDT.
- */
-static int __init early_mem(char *p)
-{
-	phys_addr_t limit;
-
-	if (!p)
-		return 1;
-
-	limit = memparse(p, &p) & PAGE_MASK;
-	pr_notice("Memory limited to %lldMB\n", limit >> 20);
-
-	memblock_enforce_memory_limit(limit);
-
-	return 0;
-}
-early_param("mem", early_mem);
 
 static void __init request_standard_resources(void)
 {
@@ -245,7 +263,72 @@ static void __init request_standard_resources(void)
 	}
 }
 
+#ifdef CONFIG_BLK_DEV_INITRD
+/*
+ * Relocate initrd if it is not completely within the linear mapping.
+ * This would be the case if mem= cuts out all or part of it.
+ */
+static void __init relocate_initrd(void)
+{
+	phys_addr_t orig_start = __virt_to_phys(initrd_start);
+	phys_addr_t orig_end = __virt_to_phys(initrd_end);
+	phys_addr_t ram_end = memblock_end_of_DRAM();
+	phys_addr_t new_start;
+	unsigned long size, to_free = 0;
+	void *dest;
+
+	if (orig_end <= ram_end)
+		return;
+
+	/*
+	 * Any of the original initrd which overlaps the linear map should
+	 * be freed after relocating.
+	 */
+	if (orig_start < ram_end)
+		to_free = ram_end - orig_start;
+
+	size = orig_end - orig_start;
+	if (!size)
+		return;
+
+	/* initrd needs to be relocated completely inside linear mapping */
+	new_start = memblock_find_in_range(0, PFN_PHYS(max_pfn),
+					   size, PAGE_SIZE);
+	if (!new_start)
+		panic("Cannot relocate initrd of size %ld\n", size);
+	memblock_reserve(new_start, size);
+
+	initrd_start = __phys_to_virt(new_start);
+	initrd_end   = initrd_start + size;
+
+	pr_info("Moving initrd from [%llx-%llx] to [%llx-%llx]\n",
+		orig_start, orig_start + size - 1,
+		new_start, new_start + size - 1);
+
+	dest = (void *)initrd_start;
+
+	if (to_free) {
+		memcpy(dest, (void *)__phys_to_virt(orig_start), to_free);
+		dest += to_free;
+	}
+
+	copy_from_early_mem(dest, orig_start + to_free, size - to_free);
+
+	if (to_free) {
+		pr_info("Freeing original RAMDISK from [%llx-%llx]\n",
+			orig_start, orig_start + to_free - 1);
+		memblock_free(orig_start, to_free);
+	}
+}
+#else
+static inline void __init relocate_initrd(void)
+{
+}
+#endif
+
 u64 __cpu_logical_map[NR_CPUS] = { [0 ... NR_CPUS-1] = INVALID_HWID };
+
+void __init __weak init_random_pool(void) { }
 
 void __init setup_arch(char **cmdline_p)
 {
@@ -276,6 +359,10 @@ void __init setup_arch(char **cmdline_p)
 	arm64_memblock_init();
 
 	paging_init();
+	relocate_initrd();
+
+	kasan_init();
+
 	request_standard_resources();
 
 	early_ioremap_reset();
@@ -305,6 +392,8 @@ void __init setup_arch(char **cmdline_p)
 	conswitchp = &dummy_con;
 #endif
 #endif
+	init_random_pool();
+
 	if (boot_args[1] || boot_args[2] || boot_args[3]) {
 		pr_err("WARNING: x1-x3 nonzero in violation of boot protocol:\n"
 			"\tx1: %016llx\n\tx2: %016llx\n\tx3: %016llx\n"
@@ -332,4 +421,11 @@ static int __init topology_init(void)
 
 	return 0;
 }
-subsys_initcall(topology_init);
+postcore_initcall(topology_init);
+
+
+void arch_setup_pdev_archdata(struct platform_device *pdev)
+{
+	pdev->archdata.dma_mask = DMA_BIT_MASK(32);
+	pdev->dev.dma_mask = &pdev->archdata.dma_mask;
+}

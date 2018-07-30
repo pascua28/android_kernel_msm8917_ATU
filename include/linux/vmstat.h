@@ -160,6 +160,26 @@ static inline unsigned long zone_page_state_snapshot(struct zone *zone,
 	return x;
 }
 
+static inline unsigned long global_page_state_snapshot(enum zone_stat_item item)
+{
+	long x = atomic_long_read(&vm_stat[item]);
+
+#ifdef CONFIG_SMP
+	struct zone *zone;
+	int cpu;
+
+	for_each_online_cpu(cpu) {
+		for_each_populated_zone(zone)
+			x += per_cpu_ptr(zone->pageset,
+				cpu)->vm_stat_diff[item];
+	}
+
+	if (x < 0)
+		x = 0;
+#endif
+	return x;
+}
+
 #ifdef CONFIG_NUMA
 /*
  * Determine the per node value of a stat item. This function
@@ -285,6 +305,12 @@ static inline void __mod_zone_freepage_state(struct zone *zone, int nr_pages,
 	__mod_zone_page_state(zone, NR_FREE_PAGES, nr_pages);
 	if (is_migrate_cma(migratetype))
 		__mod_zone_page_state(zone, NR_FREE_CMA_PAGES, nr_pages);
+#ifdef CONFIG_HUAWEI_UNMOVABLE_ISOLATE
+	else if (is_unmovable_isolate1(migratetype))
+		__mod_zone_page_state(zone, NR_FREE_UNMOVABLE_ISOLATE1_PAGES, nr_pages);
+	else if (is_unmovable_isolate2(migratetype))
+		__mod_zone_page_state(zone, NR_FREE_UNMOVABLE_ISOLATE2_PAGES, nr_pages);
+#endif
 }
 
 extern const char * const vmstat_text[];

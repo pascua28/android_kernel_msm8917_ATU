@@ -11,10 +11,13 @@
 # Copyright (C) 1995-2002 Russell King
 #
 
-ifneq ($(MACHINE),)
-include $(srctree)/$(MACHINE)/Makefile.boot
-endif
 include $(srctree)/arch/arm/boot/dts/Makefile
+
+include $(srctree)/arch/arm/boot/dts/Makefile
+ifneq ($(DTSSUBDIR),)
+DTSSUBDIR_INCS=$(foreach DIR, $(DTSSUBDIR), $(addsuffix /Makefile, $(addprefix $(srctree)/arch/arm/boot/dts/, $(DIR))))
+include $(DTSSUBDIR_INCS)
+endif
 
 # Note: the following conditions must always be true:
 #   ZRELADDR == virt_to_phys(PAGE_OFFSET + TEXT_OFFSET)
@@ -34,7 +37,7 @@ DTB_LIST := $(addsuffix .dtb,$(DTB_NAMES))
 else
 DTB_LIST := $(dtb-y)
 endif
-DTB_OBJS := $(addprefix $(obj)/dts/,$(DTB_LIST))
+DTB_OBJS := $(addprefix $(obj)/dts/qcom/,$(DTB_LIST))
 
 ifeq ($(CONFIG_XIP_KERNEL),y)
 

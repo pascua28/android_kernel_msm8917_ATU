@@ -86,6 +86,9 @@ void __init_rwsem(struct rw_semaphore *sem, const char *name,
 	sem->owner = NULL;
 	osq_lock_init(&sem->osq);
 #endif
+#ifdef CONFIG_HW_VIP_THREAD
+	sem->vip_dep_task = NULL;
+#endif
 }
 
 EXPORT_SYMBOL(__init_rwsem);
@@ -217,7 +220,11 @@ struct rw_semaphore __sched *rwsem_down_read_failed(struct rw_semaphore *sem)
 	raw_spin_lock_irq(&sem->wait_lock);
 	if (list_empty(&sem->wait_list))
 		adjustment += RWSEM_WAITING_BIAS;
+#ifdef CONFIG_HW_VIP_THREAD
+	rwsem_list_add(tsk, &waiter.list, &sem->wait_list);
+#else
 	list_add_tail(&waiter.list, &sem->wait_list);
+#endif
 
 	/* we're now waiting on the lock, but no longer actively locking */
 	count = rwsem_atomic_update(adjustment, sem);
@@ -231,6 +238,10 @@ struct rw_semaphore __sched *rwsem_down_read_failed(struct rw_semaphore *sem)
 	    (count > RWSEM_WAITING_BIAS &&
 	     adjustment != -RWSEM_ACTIVE_READ_BIAS))
 		sem = __rwsem_do_wake(sem, RWSEM_WAKE_ANY);
+
+#ifdef CONFIG_HW_VIP_THREAD
+	rwsem_dynamic_vip_enqueue(tsk, waiter.task, READ_ONCE(sem->owner), sem);
+#endif
 
 	raw_spin_unlock_irq(&sem->wait_lock);
 
@@ -429,7 +440,11 @@ struct rw_semaphore __sched *rwsem_down_write_failed(struct rw_semaphore *sem)
 	if (list_empty(&sem->wait_list))
 		waiting = false;
 
+#ifdef CONFIG_HW_VIP_THREAD
+	rwsem_list_add(waiter.task, &waiter.list, &sem->wait_list);
+#else
 	list_add_tail(&waiter.list, &sem->wait_list);
+#endif
 
 	/* we're now waiting on the lock, but no longer actively locking */
 	if (waiting) {
@@ -445,6 +460,10 @@ struct rw_semaphore __sched *rwsem_down_write_failed(struct rw_semaphore *sem)
 
 	} else
 		count = rwsem_atomic_update(RWSEM_WAITING_BIAS, sem);
+
+#ifdef CONFIG_HW_VIP_THREAD
+	rwsem_dynamic_vip_enqueue(waiter.task, current, READ_ONCE(sem->owner), sem);
+#endif
 
 	/* wait until we successfully acquire the lock */
 	set_current_state(TASK_UNINTERRUPTIBLE);
@@ -484,6 +503,10 @@ struct rw_semaphore *rwsem_wake(struct rw_semaphore *sem)
 	/* do nothing if list empty */
 	if (!list_empty(&sem->wait_list))
 		sem = __rwsem_do_wake(sem, RWSEM_WAKE_ANY);
+
+#ifdef CONFIG_HW_VIP_THREAD
+	rwsem_dynamic_vip_dequeue(sem, current);
+#endif
 
 	raw_spin_unlock_irqrestore(&sem->wait_lock, flags);
 

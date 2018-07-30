@@ -26,6 +26,19 @@ struct cpu {
 	struct device dev;
 };
 
+struct cpu_pstate_pwr {
+	unsigned int freq;
+	uint32_t power;
+};
+
+struct cpu_pwr_stats {
+	int cpu;
+	long temp;
+	struct cpu_pstate_pwr *ptable;
+	bool throttling;
+	int len;
+};
+
 extern int register_cpu(struct cpu *cpu, int num);
 extern struct device *get_cpu_device(unsigned cpu);
 extern bool cpu_is_hotpluggable(unsigned cpu);
@@ -69,6 +82,7 @@ enum {
 	/* migration should happen before other stuff but after perf */
 	CPU_PRI_PERF		= 20,
 	CPU_PRI_MIGRATION	= 10,
+	CPU_PRI_SMPBOOT		= 9,
 	/* bring up workqueues before normal notifiers and down after */
 	CPU_PRI_WORKQUEUE_UP	= 5,
 	CPU_PRI_WORKQUEUE_DOWN	= -5,
@@ -157,6 +171,7 @@ static inline void __unregister_cpu_notifier(struct notifier_block *nb)
 }
 #endif
 
+void smpboot_thread_init(void);
 int cpu_up(unsigned int cpu);
 void notify_cpu_starting(unsigned int cpu);
 extern void cpu_maps_update_begin(void);
@@ -201,6 +216,10 @@ static inline void cpu_notifier_register_begin(void)
 }
 
 static inline void cpu_notifier_register_done(void)
+{
+}
+
+static inline void smpboot_thread_init(void)
 {
 }
 
@@ -251,6 +270,10 @@ extern void enable_nonboot_cpus(void);
 static inline int disable_nonboot_cpus(void) { return 0; }
 static inline void enable_nonboot_cpus(void) {}
 #endif /* !CONFIG_PM_SLEEP_SMP */
+
+struct cpu_pwr_stats *get_cpu_pwr_stats(void);
+void trigger_cpu_pwr_stats_calc(void);
+int register_cpu_pwr_stats_ready_notifier(struct notifier_block *nb);
 
 enum cpuhp_state {
 	CPUHP_OFFLINE,

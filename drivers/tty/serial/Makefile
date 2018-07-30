@@ -62,6 +62,7 @@ obj-$(CONFIG_SERIAL_ATMEL) += atmel_serial.o
 obj-$(CONFIG_SERIAL_UARTLITE) += uartlite.o
 obj-$(CONFIG_SERIAL_MSM) += msm_serial.o
 obj-$(CONFIG_SERIAL_MSM_HS) += msm_serial_hs.o
+obj-$(CONFIG_SERIAL_MSM_HSL) += msm_serial_hs_lite.o
 obj-$(CONFIG_SERIAL_NETX) += netx-serial.o
 obj-$(CONFIG_SERIAL_OF_PLATFORM) += of_serial.o
 obj-$(CONFIG_SERIAL_OF_PLATFORM_NWPSERIAL) += nwpserial.o
@@ -96,3 +97,5 @@ obj-$(CONFIG_SERIAL_MEN_Z135)	+= men_z135_uart.o
 
 # GPIOLIB helpers for modem control lines
 obj-$(CONFIG_SERIAL_MCTRL_GPIO)	+= serial_mctrl_gpio.o
+
+obj-$(CONFIG_SERIAL_MSM_HSL_CONSOLE) += serial_log_switch/

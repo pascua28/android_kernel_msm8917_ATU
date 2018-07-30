@@ -41,6 +41,13 @@
 #include <linux/log2.h>
 #include <linux/configfs.h>
 
+/* FUNCTION_SUSPEND: suspend options from usb 3.0 spec Table 9-7 */
+#define FUNC_SUSPEND_OPT_SUSP_MASK BIT(0)
+#define FUNC_SUSPEND_OPT_RW_EN_MASK BIT(1)
+
+#define FUNC_WAKEUP_CAPABLE_SHIFT  0
+#define FUNC_WAKEUP_ENABLE_SHIFT   1
+
 /*
  * USB function drivers should return USB_GADGET_DELAYED_STATUS if they
  * wish to delay the data/status stages of the control transfer till they
@@ -51,7 +58,7 @@
 #define USB_GADGET_DELAYED_STATUS       0x7fff	/* Impossibly large value */
 
 /* big enough to hold our biggest descriptor */
-#define USB_COMP_EP0_BUFSIZ	1024
+#define USB_COMP_EP0_BUFSIZ	4096
 
 #define USB_MS_TO_HS_INTERVAL(x)	(ilog2((x * 1000 / 125)) + 1)
 struct usb_configuration;
@@ -153,7 +160,14 @@ struct usb_os_desc_table {
  * @get_status: Returns function status as a reply to
  *	GetStatus() request when the recipient is Interface.
  * @func_suspend: callback to be called when
- *	SetFeature(FUNCTION_SUSPEND) is reseived
+ *	SetFeature(FUNCTION_SUSPEND) is received
+ * @func_is_suspended: Tells whether the function is currently in
+ *	Function Suspend state (used in Super Speed mode only).
+ * @func_wakeup_allowed: Tells whether Function Remote Wakeup has been allowed
+ *	by the USB host (used in Super Speed mode only).
+ * @func_wakeup_pending: Marks that the function has issued a Function Wakeup
+ *	while the USB bus was suspended and therefore a Function Wakeup
+ *	notification needs to be sent once the USB bus is resumed.
  *
  * A single USB function uses one or more interfaces, and should in most
  * cases support operation at both full and high speeds.  Each function is
@@ -181,6 +195,7 @@ struct usb_os_desc_table {
 
 struct usb_function {
 	const char			*name;
+	int				intf_id;
 	struct usb_gadget_strings	**strings;
 	struct usb_descriptor_header	**fs_descriptors;
 	struct usb_descriptor_header	**hs_descriptors;
@@ -220,6 +235,9 @@ struct usb_function {
 	int			(*get_status)(struct usb_function *);
 	int			(*func_suspend)(struct usb_function *,
 						u8 suspend_opt);
+	unsigned		func_is_suspended:1;
+	unsigned		func_wakeup_allowed:1;
+	unsigned		func_wakeup_pending:1;
 	/* private: */
 	/* internals */
 	struct list_head		list;
@@ -233,6 +251,9 @@ int usb_function_deactivate(struct usb_function *);
 int usb_function_activate(struct usb_function *);
 
 int usb_interface_id(struct usb_configuration *, struct usb_function *);
+int usb_func_wakeup(struct usb_function *func);
+
+int usb_get_func_interface_id(struct usb_function *func);
 
 int config_ep_by_speed(struct usb_gadget *g, struct usb_function *f,
 			struct usb_ep *_ep);
@@ -313,6 +334,10 @@ struct usb_configuration {
 	unsigned		highspeed:1;
 	unsigned		fullspeed:1;
 	struct usb_function	*interface[MAX_CONFIG_INTERFACES];
+
+	/* number of in and out eps used in this configuration */
+	int			num_ineps_used;
+	int			num_outeps_used;
 };
 
 int usb_add_config(struct usb_composite_dev *,

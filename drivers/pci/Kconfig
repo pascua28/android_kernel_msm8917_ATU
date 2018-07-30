@@ -4,6 +4,7 @@
 config PCI_MSI
 	bool "Message Signaled Interrupts (MSI and MSI-X)"
 	depends on PCI
+	select GENERIC_MSI_IRQ
 	help
 	   This allows device drivers to enable MSI (Message Signaled
 	   Interrupts).  Message Signaled Interrupts enable a device to
@@ -15,6 +16,11 @@ config PCI_MSI
 	   entire system.
 
 	   If you don't know what to do here, say Y.
+
+config PCI_MSI_IRQ_DOMAIN
+	bool
+	depends on PCI_MSI
+	select GENERIC_MSI_IRQ_DOMAIN
 
 config PCI_DEBUG
 	bool "PCI Debugging"
@@ -110,6 +116,20 @@ config PCI_IOAPIC
 	depends on ACPI
 	depends on X86_IO_APIC
 	default !X86
+
+config PCI_MSM
+	bool "MSM PCIe Controller driver"
+	depends on ARCH_MSM && PCI
+	select PCI_DOMAINS
+	select PCI_DOMAINS_GENERIC
+	select PCI_MSI
+	help
+	  Enables the PCIe functionality by configuring PCIe core on
+	  MSM chipset and by enabling the ARM PCI framework extension.
+	  The PCIe core is essential for communication between the host
+	  and an endpoint.
+
+	  If unsure, say N.
 
 config PCI_LABEL
 	def_bool y if (DMI || ACPI)

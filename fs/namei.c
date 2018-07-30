@@ -2576,8 +2576,14 @@ int vfs_create2(struct vfsmount *mnt, struct inode *dir, struct dentry *dentry,
 	if (error)
 		return error;
 	error = dir->i_op->create(dir, dentry, mode, want_excl);
+	if (error)
+		return error;
+	error = security_inode_post_create(dir, dentry, mode);
+	if (error)
+		return error;
 	if (!error)
 		fsnotify_create(dir, dentry);
+
 	return error;
 }
 EXPORT_SYMBOL(vfs_create2);
@@ -3297,6 +3303,8 @@ out2:
 				error = -ESTALE;
 		}
 		file = ERR_PTR(error);
+	} else {
+		global_filetable_add(file);
 	}
 	return file;
 }
@@ -3453,8 +3461,16 @@ int vfs_mknod2(struct vfsmount *mnt, struct inode *dir, struct dentry *dentry, u
 		return error;
 
 	error = dir->i_op->mknod(dir, dentry, mode, dev);
+	if (error)
+		return error;
+
+	error = security_inode_post_create(dir, dentry, mode);
+	if (error)
+		return error;
+
 	if (!error)
 		fsnotify_create(dir, dentry);
+
 	return error;
 }
 EXPORT_SYMBOL(vfs_mknod2);
@@ -4163,7 +4179,11 @@ int vfs_rename2(struct vfsmount *mnt,
 	unsigned max_links = new_dir->i_sb->s_max_links;
 	struct name_snapshot old_name;
 
-	if (source == target)
+	/*
+	 * Check source == target.
+	 * On overlayfs need to look at underlying inodes.
+	 */
+	if (vfs_select_inode(old_dentry, 0) == vfs_select_inode(new_dentry, 0))
 		return 0;
 
 	error = may_delete(mnt, old_dir, old_dentry, is_dir);

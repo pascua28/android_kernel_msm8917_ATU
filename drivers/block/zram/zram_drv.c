@@ -32,6 +32,8 @@
 #include <linux/string.h>
 #include <linux/vmalloc.h>
 #include <linux/err.h>
+#include <linux/show_mem_notifier.h>
+#include <linux/ratelimit.h>
 
 #include "zram_drv.h"
 
@@ -39,6 +41,12 @@
 static int zram_major;
 static struct zram *zram_devices;
 static const char *default_compressor = "lzo";
+
+/*
+ * We don't need to see memory allocation errors more than once every 1
+ * second to know that a problem is occurring.
+ */
+#define ALLOC_ERROR_LOG_RATE_MS 1000
 
 /* Module params (documentation at end) */
 static unsigned int num_devices = 1;
@@ -68,6 +76,49 @@ static inline bool init_done(struct zram *zram)
 {
 	return zram->disksize;
 }
+
+static int zram_show_mem_notifier(struct notifier_block *nb,
+				unsigned long action,
+				void *data)
+{
+	int i;
+
+	if (!zram_devices)
+		return 0;
+
+	for (i = 0; i < num_devices; i++) {
+		struct zram *zram = &zram_devices[i];
+		struct zram_meta *meta = zram->meta;
+
+		if (!down_read_trylock(&zram->init_lock))
+			continue;
+
+		if (init_done(zram)) {
+			u64 val;
+			u64 data_size;
+			u64 orig_data_size;
+
+			val = zs_get_total_pages(meta->mem_pool);
+			data_size = atomic64_read(&zram->stats.compr_data_size);
+			orig_data_size = atomic64_read(
+						&zram->stats.pages_stored);
+			pr_info("Zram[%d] mem_used_total = %llu\n", i,
+							val << PAGE_SHIFT);
+			pr_info("Zram[%d] compr_data_size = %llu\n", i,
+				(unsigned long long)data_size);
+			pr_info("Zram[%d] orig_data_size = %llu\n", i,
+				(unsigned long long)orig_data_size);
+		}
+
+		up_read(&zram->init_lock);
+	}
+
+	return 0;
+}
+
+static struct notifier_block zram_show_mem_notifier_block = {
+	.notifier_call = zram_show_mem_notifier
+};
 
 static inline struct zram *dev_to_zram(struct device *dev)
 {
@@ -588,6 +639,7 @@ static int zram_bvec_write(struct zram *zram, struct bio_vec *bvec, u32 index,
 	struct zcomp_strm *zstrm;
 	bool locked = false;
 	unsigned long alloced_pages;
+	static unsigned long zram_rs_time;
 
 	page = bvec->bv_page;
 	if (is_partial_io(bvec)) {
@@ -652,8 +704,11 @@ static int zram_bvec_write(struct zram *zram, struct bio_vec *bvec, u32 index,
 
 	handle = zs_malloc(meta->mem_pool, clen);
 	if (!handle) {
-		pr_info("Error allocating memory for compressed page: %u, size=%zu\n",
-			index, clen);
+		if (printk_timed_ratelimit(&zram_rs_time,
+					   ALLOC_ERROR_LOG_RATE_MS))
+			pr_info("Error allocating memory for compressed page: %u, size=%zu\n",
+				index, clen);
+
 		ret = -ENOMEM;
 		goto out;
 	}
@@ -1185,6 +1240,7 @@ static int create_device(struct zram *zram, int device_id)
 	zram->disk->private_data = zram;
 	snprintf(zram->disk->disk_name, 16, "zram%d", device_id);
 
+	__set_bit(QUEUE_FLAG_FAST, &queue->queue_flags);
 	/* Actual capacity set using syfs (/sys/block/zram<id>/disksize */
 	set_capacity(zram->disk, 0);
 	/* zram devices sort of resembles non-rotational disks */
@@ -1292,7 +1348,9 @@ static int __init zram_init(void)
 			goto out_error;
 	}
 
-	pr_info("Created %u device(s)\n", num_devices);
+	show_mem_notifier_register(&zram_show_mem_notifier_block);
+	pr_info("Created %u device(s) ...\n", num_devices);
+
 	return 0;
 
 out_error:

@@ -10,11 +10,17 @@
 #include <asm/memory.h>
 #include <asm/page.h>
 #include <asm/pgtable.h>
+#include <asm/cache.h>
 
 #include "image.h"
 
+#if (!defined(CONFIG_DEBUG_SPINLOCK)) || defined(CONFIG_GENERIC_BUG)
+#define ARM_EXIT_KEEP(x)	x
+#define ARM_EXIT_DISCARD(x)
+#else
 #define ARM_EXIT_KEEP(x)
 #define ARM_EXIT_DISCARD(x)	x
+#endif
 
 OUTPUT_ARCH(aarch64)
 ENTRY(_text)
@@ -87,9 +93,11 @@ SECTIONS
 			*(.exception.text)
 			__exception_text_end = .;
 			IRQENTRY_TEXT
+			ENTRY_TEXT
 			TEXT_TEXT
 			SCHED_TEXT
 			LOCK_TEXT
+			KPROBES_TEXT
 			HYPERVISOR_TEXT
 			*(.fixup)
 			*(.gnu.warning)
@@ -126,10 +134,17 @@ SECTIONS
 		ARM_EXIT_KEEP(EXIT_DATA)
 	}
 
-	PERCPU_SECTION(64)
+	PERCPU_SECTION(L1_CACHE_BYTES)
 
 	. = ALIGN(PAGE_SIZE);
 	__init_end = .;
+
+	. = ALIGN(32);
+	__start_hwlog_tag = .;
+	__start_hwlog_tag : {
+		*(__hwlog_tag)
+	}
+	__stop_hwlog_tag = .;
 
 	. = ALIGN(4);
 	.altinstructions : {
@@ -144,7 +159,7 @@ SECTIONS
 	. = ALIGN(PAGE_SIZE);
 	_data = .;
 	_sdata = .;
-	RW_DATA_SECTION(64, PAGE_SIZE, THREAD_SIZE)
+	RW_DATA_SECTION(L1_CACHE_BYTES, PAGE_SIZE, THREAD_SIZE)
 	PECOFF_EDATA_PADDING
 	_edata = .;
 

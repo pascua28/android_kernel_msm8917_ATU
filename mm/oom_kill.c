@@ -35,7 +35,9 @@
 #include <linux/freezer.h>
 #include <linux/ftrace.h>
 #include <linux/ratelimit.h>
-
+#ifdef CONFIG_FASTBOOT_DUMP
+#include <linux/fastboot_dump_reason_api.h>
+#endif
 #define CREATE_TRACE_POINTS
 #include <trace/events/oom.h>
 
@@ -353,7 +355,7 @@ static struct task_struct *select_bad_process(unsigned int *ppoints,
  * State information includes task's pid, uid, tgid, vm size, rss, nr_ptes,
  * swapents, oom_score_adj value, and name.
  */
-static void dump_tasks(const struct mem_cgroup *memcg, const nodemask_t *nodemask)
+void dump_tasks(const struct mem_cgroup *memcg, const nodemask_t *nodemask)
 {
 	struct task_struct *p;
 	struct task_struct *task;
@@ -676,6 +678,10 @@ void out_of_memory(struct zonelist *zonelist, gfp_t gfp_mask,
 	p = select_bad_process(&points, totalpages, mpol_mask, force_kill);
 	/* Found nothing?!?! Either we hang forever, or we panic. */
 	if (!p) {
+#ifdef CONFIG_FASTBOOT_DUMP
+		fastboot_dump_s_reason_set(FD_S_APANIC_OUT_OF_MEMORY);
+		fastboot_dump_s_reason_str_set("Out_of_memory");
+#endif
 		dump_header(NULL, gfp_mask, order, NULL, mpol_mask);
 		panic("Out of memory and no killable processes...\n");
 	}

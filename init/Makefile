@@ -11,6 +11,10 @@ ifneq ($(CONFIG_ARCH_INIT_TASK),y)
 obj-y                          += init_task.o
 endif
 
+ifeq ($(TARGET_BUILD_VARIANT),eng)
+EXTRA_CFLAGS += -DCMDLINE_INFO_FILTER
+endif
+
 mounts-y			:= do_mounts.o
 mounts-$(CONFIG_BLK_DEV_RAM)	+= do_mounts_rd.o
 mounts-$(CONFIG_BLK_DEV_INITRD)	+= do_mounts_initrd.o

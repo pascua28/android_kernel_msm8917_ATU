@@ -406,6 +406,9 @@ sg_read(struct file *filp, char __user *buf, size_t count, loff_t * ppos)
 	struct sg_header *old_hdr = NULL;
 	int retval = 0;
 
+	if (unlikely(segment_eq(get_fs(), KERNEL_DS)))
+		return -EINVAL;
+
 	if ((!(sfp = (Sg_fd *) filp->private_data)) || (!(sdp = sfp->parentdp)))
 		return -ENXIO;
 	SCSI_LOG_TIMEOUT(3, sg_printk(KERN_INFO, sdp,
@@ -1561,9 +1564,6 @@ sg_add_device(struct device *cl_dev, struct class_interface *cl_intf)
 			       "to sg%d\n", __func__, sdp->index);
 	} else
 		pr_warn("%s: sg_sys Invalid\n", __func__);
-
-	sdev_printk(KERN_NOTICE, scsidp, "Attached scsi generic sg%d "
-		    "type %d\n", sdp->index, scsidp->type);
 
 	dev_set_drvdata(cl_dev, sdp);
 

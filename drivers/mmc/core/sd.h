@@ -13,4 +13,7 @@ int mmc_sd_setup_card(struct mmc_host *host, struct mmc_card *card,
 unsigned mmc_sd_get_max_clock(struct mmc_card *card);
 int mmc_sd_switch_hs(struct mmc_card *card);
 
+#ifdef CONFIG_MMC_PASSWORDS
+int mmc_sd_init_uhs_card(struct mmc_card *card);
+#endif
 #endif

@@ -594,11 +594,12 @@ static int ci_hdrc_probe(struct platform_device *pdev)
 		return -ENOMEM;
 	}
 
-	spin_lock_init(&ci->lock);
 	ci->dev = dev;
 	ci->platdata = dev_get_platdata(dev);
 	ci->imx28_write_fix = !!(ci->platdata->flags &
 		CI_HDRC_IMX28_WRITE_FIX);
+
+	ci->gadget.l1_supported = ci->platdata->l1_supported;
 
 	ret = hw_device_init(ci, base);
 	if (ret < 0) {

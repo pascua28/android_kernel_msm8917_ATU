@@ -56,6 +56,7 @@ obj-$(CONFIG_DM_CACHE)		+= dm-cache.o
 obj-$(CONFIG_DM_CACHE_MQ)	+= dm-cache-mq.o
 obj-$(CONFIG_DM_CACHE_CLEANER)	+= dm-cache-cleaner.o
 obj-$(CONFIG_DM_ERA)		+= dm-era.o
+obj-$(CONFIG_DM_REQ_CRYPT)     += dm-req-crypt.o
 obj-$(CONFIG_DM_ANDROID_VERITY) += dm-android-verity.o
 
 ifeq ($(CONFIG_DM_UEVENT),y)

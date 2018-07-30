@@ -138,9 +138,28 @@ static void __init arm64_memory_present(void)
 }
 #endif
 
+static phys_addr_t memory_limit = (phys_addr_t)ULLONG_MAX;
+
+/*
+ * Limit the memory size that was specified via FDT.
+ */
+static int __init early_mem(char *p)
+{
+	if (!p)
+		return 1;
+
+	memory_limit = memparse(p, &p) & PAGE_MASK;
+	pr_notice("Memory limited to %lldMB\n", memory_limit >> 20);
+
+	return 0;
+}
+early_param("mem", early_mem);
+
 void __init arm64_memblock_init(void)
 {
 	phys_addr_t dma_phys_limit = 0;
+
+	memblock_enforce_memory_limit(memory_limit);
 
 	/*
 	 * Register the kernel text, kernel data, initrd, and initial
@@ -169,6 +188,8 @@ void __init bootmem_init(void)
 
 	min = PFN_UP(memblock_start_of_DRAM());
 	max = PFN_DOWN(memblock_end_of_DRAM());
+
+	early_memtest(min << PAGE_SHIFT, max << PAGE_SHIFT);
 
 	/*
 	 * Sparsemem tries to allocate bootmem in memory_present(), so must be
@@ -274,6 +295,9 @@ void __init mem_init(void)
 #define MLK_ROUNDUP(b, t) b, t, DIV_ROUND_UP(((t) - (b)), SZ_1K)
 
 	pr_notice("Virtual kernel memory layout:\n"
+#ifdef CONFIG_KASAN
+		  "    kasan   : 0x%16lx - 0x%16lx   (%6ld GB)\n"
+#endif
 		  "    vmalloc : 0x%16lx - 0x%16lx   (%6ld GB)\n"
 #ifdef CONFIG_SPARSEMEM_VMEMMAP
 		  "    vmemmap : 0x%16lx - 0x%16lx   (%6ld GB maximum)\n"
@@ -286,6 +310,9 @@ void __init mem_init(void)
 		  "      .init : 0x%p" " - 0x%p" "   (%6ld KB)\n"
 		  "      .text : 0x%p" " - 0x%p" "   (%6ld KB)\n"
 		  "      .data : 0x%p" " - 0x%p" "   (%6ld KB)\n",
+#ifdef CONFIG_KASAN
+		  MLG(KASAN_SHADOW_START, KASAN_SHADOW_END),
+#endif
 		  MLG(VMALLOC_START, VMALLOC_END),
 #ifdef CONFIG_SPARSEMEM_VMEMMAP
 		  MLG(VMEMMAP_START,
@@ -325,6 +352,11 @@ void __init mem_init(void)
 	}
 }
 
+static inline void poison_init_mem(void *s, size_t count)
+{
+	memset(s, 0, count);
+}
+
 void free_initmem(void)
 {
 	fixup_init();
@@ -349,4 +381,17 @@ static int __init keepinitrd_setup(char *__unused)
 }
 
 __setup("keepinitrd", keepinitrd_setup);
+#endif
+
+#ifdef CONFIG_KERNEL_TEXT_RDONLY
+void set_kernel_text_ro(void)
+{
+	unsigned long start = PFN_ALIGN(_stext);
+	unsigned long end = PFN_ALIGN(_etext);
+
+	/*
+	 * Set the kernel identity mapping for text RO.
+	 */
+	set_memory_ro(start, (end - start) >> PAGE_SHIFT);
+}
 #endif

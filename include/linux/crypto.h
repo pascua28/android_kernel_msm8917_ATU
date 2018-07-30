@@ -873,6 +873,12 @@ static inline void aead_request_set_crypt(struct aead_request *req,
 	req->iv = iv;
 }
 
+static inline void aead_request_set_ad(struct aead_request *req,
+				       unsigned int assoclen)
+{
+	req->assoclen = assoclen;
+}
+
 static inline void aead_request_set_assoc(struct aead_request *req,
 					  struct scatterlist *assoc,
 					  unsigned int assoclen)

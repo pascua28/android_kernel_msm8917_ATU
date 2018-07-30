@@ -30,6 +30,7 @@
 #include <linux/bug.h>
 #include <linux/compiler.h>
 #include <linux/sort.h>
+#include <linux/dma-mapping.h>
 
 #include <asm/unified.h>
 #include <asm/cp15.h>
@@ -104,6 +105,14 @@ EXPORT_SYMBOL(elf_hwcap);
 unsigned int elf_hwcap2 __read_mostly;
 EXPORT_SYMBOL(elf_hwcap2);
 
+char* (*arch_read_hardware_id)(void);
+EXPORT_SYMBOL(arch_read_hardware_id);
+
+unsigned int boot_reason;
+EXPORT_SYMBOL(boot_reason);
+
+unsigned int cold_boot;
+EXPORT_SYMBOL(cold_boot);
 
 #ifdef MULTI_CPU
 struct processor processor __read_mostly;
@@ -374,30 +383,48 @@ void __init early_print(const char *str, ...)
 
 static void __init cpuid_init_hwcaps(void)
 {
-	unsigned int divide_instrs, vmsa;
+	int block;
+	u32 isar5;
 
 	if (cpu_architecture() < CPU_ARCH_ARMv7)
 		return;
 
-	divide_instrs = (read_cpuid_ext(CPUID_EXT_ISAR0) & 0x0f000000) >> 24;
-
-	switch (divide_instrs) {
-	case 2:
+	block = cpuid_feature_extract(CPUID_EXT_ISAR0, 24);
+	if (block >= 2)
 		elf_hwcap |= HWCAP_IDIVA;
-	case 1:
+	if (block >= 1)
 		elf_hwcap |= HWCAP_IDIVT;
-	}
 
 	/* LPAE implies atomic ldrd/strd instructions */
-	vmsa = (read_cpuid_ext(CPUID_EXT_MMFR0) & 0xf) >> 0;
-	if (vmsa >= 5)
+	block = cpuid_feature_extract(CPUID_EXT_MMFR0, 0);
+	if (block >= 5)
 		elf_hwcap |= HWCAP_LPAE;
+
+	/* check for supported v8 Crypto instructions */
+	isar5 = read_cpuid_ext(CPUID_EXT_ISAR5);
+
+	block = cpuid_feature_extract_field(isar5, 4);
+	if (block >= 2)
+		elf_hwcap2 |= HWCAP2_PMULL;
+	if (block >= 1)
+		elf_hwcap2 |= HWCAP2_AES;
+
+	block = cpuid_feature_extract_field(isar5, 8);
+	if (block >= 1)
+		elf_hwcap2 |= HWCAP2_SHA1;
+
+	block = cpuid_feature_extract_field(isar5, 12);
+	if (block >= 1)
+		elf_hwcap2 |= HWCAP2_SHA2;
+
+	block = cpuid_feature_extract_field(isar5, 16);
+	if (block >= 1)
+		elf_hwcap2 |= HWCAP2_CRC32;
 }
 
 static void __init elf_hwcap_fixup(void)
 {
 	unsigned id = read_cpuid_id();
-	unsigned sync_prim;
 
 	/*
 	 * HWCAP_TLS is available only on 1136 r1p0 and later,
@@ -418,9 +445,9 @@ static void __init elf_hwcap_fixup(void)
 	 * avoid advertising SWP; it may not be atomic with
 	 * multiprocessing cores.
 	 */
-	sync_prim = ((read_cpuid_ext(CPUID_EXT_ISAR3) >> 8) & 0xf0) |
-		    ((read_cpuid_ext(CPUID_EXT_ISAR4) >> 20) & 0x0f);
-	if (sync_prim >= 0x13)
+	if (cpuid_feature_extract(CPUID_EXT_ISAR3, 12) > 1 ||
+	    (cpuid_feature_extract(CPUID_EXT_ISAR3, 12) == 1 &&
+	     cpuid_feature_extract(CPUID_EXT_ISAR4, 20) >= 3))
 		elf_hwcap &= ~HWCAP_SWP;
 }
 
@@ -798,6 +825,40 @@ struct screen_info screen_info = {
 };
 #endif
 
+typedef enum
+{
+	RUNMODE_FLAG_NORMAL,
+	RUNMODE_FLAG_FACTORY,
+	RUNMODE_FLAG_UNKNOW
+}hw_runmode_t;
+
+#define RUNMODE_FLAG_NORMAL_KEY     "normal"
+#define RUNMODE_FLAG_FACTORY_KEY    "factory"
+
+static hw_runmode_t runmode_factory = RUNMODE_FLAG_UNKNOW;
+
+static int __init init_runmode(char *str)
+{
+	if(!str || !(*str)) {
+		printk(KERN_CRIT"%s:get run mode fail\n",__func__);
+		return 0;
+	}
+
+	if(!strncmp(str, RUNMODE_FLAG_FACTORY_KEY, sizeof(RUNMODE_FLAG_FACTORY_KEY)-1)) {
+		runmode_factory = RUNMODE_FLAG_FACTORY;
+		printk(KERN_NOTICE "%s:run mode is factory\n", __func__);
+	} else {
+		runmode_factory = RUNMODE_FLAG_NORMAL;
+		printk(KERN_NOTICE "%s:run mode is normal\n", __func__);
+	}
+
+	return 1;
+}
+
+__setup("androidboot.huawei_swtype=", init_runmode);
+
+
+
 static int __init customize_machine(void)
 {
 	/*
@@ -890,11 +951,14 @@ void __init hyp_mode_check(void)
 #endif
 }
 
+void __init __weak init_random_pool(void) { }
+
 void __init setup_arch(char **cmdline_p)
 {
 	const struct machine_desc *mdesc;
 
 	setup_processor();
+	early_ioremap_init();
 	mdesc = setup_machine_fdt(__atags_pointer);
 	if (!mdesc)
 		mdesc = setup_machine_tags(__atags_pointer, __machine_arch_type);
@@ -962,6 +1026,8 @@ void __init setup_arch(char **cmdline_p)
 
 	if (mdesc->init_early)
 		mdesc->init_early();
+
+	init_random_pool();
 }
 
 
@@ -977,7 +1043,7 @@ static int __init topology_init(void)
 
 	return 0;
 }
-subsys_initcall(topology_init);
+postcore_initcall(topology_init);
 
 #ifdef CONFIG_HAVE_PROC_CPU
 static int __init proc_cpu_init(void)
@@ -1032,7 +1098,7 @@ static int c_show(struct seq_file *m, void *v)
 	int i, j;
 	u32 cpuid;
 
-	for_each_online_cpu(i) {
+	for_each_present_cpu(i) {
 		/*
 		 * glibc reads /proc/cpuinfo to determine the number of
 		 * online processors, looking for lines beginning with
@@ -1086,10 +1152,15 @@ static int c_show(struct seq_file *m, void *v)
 		seq_printf(m, "CPU revision\t: %d\n\n", cpuid & 15);
 	}
 
-	seq_printf(m, "Hardware\t: %s\n", machine_name);
+	if (!arch_read_hardware_id)
+		seq_printf(m, "Hardware\t: %s\n", machine_name);
+	else
+		seq_printf(m, "Hardware\t: %s\n", arch_read_hardware_id());
 	seq_printf(m, "Revision\t: %04x\n", system_rev);
 	seq_printf(m, "Serial\t\t: %08x%08x\n",
 		   system_serial_high, system_serial_low);
+	seq_printf(m, "Processor\t: %s rev %d (%s)\n",
+		   cpu_name, read_cpuid_id() & 15, elf_platform);
 
 	return 0;
 }
@@ -1115,3 +1186,9 @@ const struct seq_operations cpuinfo_op = {
 	.stop	= c_stop,
 	.show	= c_show
 };
+
+void arch_setup_pdev_archdata(struct platform_device *pdev)
+{
+	pdev->archdata.dma_mask = DMA_BIT_MASK(32);
+	pdev->dev.dma_mask = &pdev->archdata.dma_mask;
+}

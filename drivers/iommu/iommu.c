@@ -31,7 +31,10 @@
 #include <linux/err.h>
 #include <linux/pci.h>
 #include <linux/bitops.h>
+#include <linux/debugfs.h>
 #include <trace/events/iommu.h>
+
+#include "iommu-debug.h"
 
 static struct kset *iommu_group_kset;
 static struct ida iommu_group_ida;
@@ -465,6 +468,37 @@ struct iommu_group *iommu_group_get(struct device *dev)
 EXPORT_SYMBOL_GPL(iommu_group_get);
 
 /**
+ * iommu_group_find - Find and return the group based on the group name.
+ * Also increment the reference count.
+ * @name: the name of the group
+ *
+ * This function is called by iommu drivers and clients to get the group
+ * by the specified name.  If found, the group is returned and the group
+ * reference is incremented, else NULL.
+ */
+struct iommu_group *iommu_group_find(const char *name)
+{
+	struct iommu_group *group;
+	int next = 0;
+
+	mutex_lock(&iommu_group_mutex);
+	while ((group = idr_get_next(&iommu_group_ida.idr, &next))) {
+		if (group->name) {
+			if (strcmp(group->name, name) == 0)
+				break;
+		}
+		++next;
+	}
+	mutex_unlock(&iommu_group_mutex);
+
+	if (group)
+		kobject_get(group->devices_kobj);
+
+	return group;
+}
+EXPORT_SYMBOL_GPL(iommu_group_find);
+
+/**
  * iommu_group_put - Decrement group reference
  * @group: the group to use
  *
@@ -848,6 +882,8 @@ EXPORT_SYMBOL_GPL(bus_set_iommu);
 
 bool iommu_present(struct bus_type *bus)
 {
+	if (!bus)
+		return false;
 	return bus->iommu_ops != NULL;
 }
 EXPORT_SYMBOL_GPL(iommu_present);
@@ -884,6 +920,45 @@ void iommu_set_fault_handler(struct iommu_domain *domain,
 }
 EXPORT_SYMBOL_GPL(iommu_set_fault_handler);
 
+/**
+ * iommu_trigger_fault() - trigger an IOMMU fault
+ * @domain: iommu domain
+ *
+ * Triggers a fault on the device to which this domain is attached.
+ *
+ * This function should only be used for debugging purposes, for obvious
+ * reasons.
+ */
+void iommu_trigger_fault(struct iommu_domain *domain, unsigned long flags)
+{
+	if (domain->ops->trigger_fault)
+		domain->ops->trigger_fault(domain, flags);
+}
+
+/**
+ * iommu_reg_read() - read an IOMMU register
+ *
+ * Reads the IOMMU register at the given offset.
+ */
+unsigned long iommu_reg_read(struct iommu_domain *domain, unsigned long offset)
+{
+	if (domain->ops->reg_read)
+		return domain->ops->reg_read(domain, offset);
+	return 0;
+}
+
+/**
+ * iommu_reg_write() - write an IOMMU register
+ *
+ * Writes the given value to the IOMMU register at the given offset.
+ */
+void iommu_reg_write(struct iommu_domain *domain, unsigned long offset,
+		     unsigned long val)
+{
+	if (domain->ops->reg_write)
+		domain->ops->reg_write(domain, offset, val);
+}
+
 struct iommu_domain *iommu_domain_alloc(struct bus_type *bus)
 {
 	struct iommu_domain *domain;
@@ -916,6 +991,8 @@ void iommu_domain_free(struct iommu_domain *domain)
 	if (likely(domain->ops->domain_destroy != NULL))
 		domain->ops->domain_destroy(domain);
 
+	iommu_debug_domain_remove(domain);
+
 	kfree(domain);
 }
 EXPORT_SYMBOL_GPL(iommu_domain_free);
@@ -927,8 +1004,10 @@ int iommu_attach_device(struct iommu_domain *domain, struct device *dev)
 		return -ENODEV;
 
 	ret = domain->ops->attach_dev(domain, dev);
-	if (!ret)
+	if (!ret) {
 		trace_attach_device_to_domain(dev);
+		iommu_debug_attach_device(domain, dev);
+	}
 	return ret;
 }
 EXPORT_SYMBOL_GPL(iommu_attach_device);
@@ -991,8 +1070,24 @@ phys_addr_t iommu_iova_to_phys(struct iommu_domain *domain, dma_addr_t iova)
 }
 EXPORT_SYMBOL_GPL(iommu_iova_to_phys);
 
-static size_t iommu_pgsize(struct iommu_domain *domain,
-			   unsigned long addr_merge, size_t size)
+phys_addr_t iommu_iova_to_phys_hard(struct iommu_domain *domain,
+				    dma_addr_t iova)
+{
+	if (unlikely(domain->ops->iova_to_phys_hard == NULL))
+		return 0;
+
+	return domain->ops->iova_to_phys_hard(domain, iova);
+}
+
+static unsigned long iommu_get_pgsize_bitmap(struct iommu_domain *domain)
+{
+	if (domain->ops->get_pgsize_bitmap)
+		return domain->ops->get_pgsize_bitmap(domain);
+	return domain->ops->pgsize_bitmap;
+}
+
+size_t iommu_pgsize(unsigned long pgsize_bitmap,
+		    unsigned long addr_merge, size_t size)
 {
 	unsigned int pgsize_idx;
 	size_t pgsize;
@@ -1011,10 +1106,14 @@ static size_t iommu_pgsize(struct iommu_domain *domain,
 	pgsize = (1UL << (pgsize_idx + 1)) - 1;
 
 	/* throw away page sizes not supported by the hardware */
-	pgsize &= domain->ops->pgsize_bitmap;
+	pgsize &= pgsize_bitmap;
 
 	/* make sure we're still sane */
-	BUG_ON(!pgsize);
+	if (!pgsize) {
+		pr_err("invalid pgsize/addr/size! 0x%lx 0x%lx 0x%zx\n",
+		       pgsize_bitmap, addr_merge, size);
+		BUG();
+	}
 
 	/* pick the biggest page */
 	pgsize_idx = __fls(pgsize);
@@ -1026,17 +1125,22 @@ static size_t iommu_pgsize(struct iommu_domain *domain,
 int iommu_map(struct iommu_domain *domain, unsigned long iova,
 	      phys_addr_t paddr, size_t size, int prot)
 {
-	unsigned long orig_iova = iova;
+	unsigned long orig_iova = iova, pgsize_bitmap;
 	unsigned int min_pagesz;
 	size_t orig_size = size;
 	int ret = 0;
 
+	trace_map_start(iova, paddr, size);
 	if (unlikely(domain->ops->map == NULL ||
-		     domain->ops->pgsize_bitmap == 0UL))
+		     (domain->ops->pgsize_bitmap == 0UL &&
+		      !domain->ops->get_pgsize_bitmap))) {
+		trace_map_end(iova, paddr, size);
 		return -ENODEV;
+	}
 
+	pgsize_bitmap = iommu_get_pgsize_bitmap(domain);
 	/* find out the minimum page size supported */
-	min_pagesz = 1 << __ffs(domain->ops->pgsize_bitmap);
+	min_pagesz = 1 << __ffs(pgsize_bitmap);
 
 	/*
 	 * both the virtual address and the physical one, as well as
@@ -1046,13 +1150,14 @@ int iommu_map(struct iommu_domain *domain, unsigned long iova,
 	if (!IS_ALIGNED(iova | paddr | size, min_pagesz)) {
 		pr_err("unaligned: iova 0x%lx pa %pa size 0x%zx min_pagesz 0x%x\n",
 		       iova, &paddr, size, min_pagesz);
+		trace_map_end(iova, paddr, size);
 		return -EINVAL;
 	}
 
 	pr_debug("map: iova 0x%lx pa %pa size 0x%zx\n", iova, &paddr, size);
 
 	while (size) {
-		size_t pgsize = iommu_pgsize(domain, iova | paddr, size);
+		size_t pgsize = iommu_pgsize(pgsize_bitmap, iova | paddr, size);
 
 		pr_debug("mapping: iova 0x%lx pa %pa pgsize 0x%zx\n",
 			 iova, &paddr, pgsize);
@@ -1072,6 +1177,7 @@ int iommu_map(struct iommu_domain *domain, unsigned long iova,
 	else
 		trace_map(iova, paddr, size);
 
+	trace_map_end(iova, paddr, size);
 	return ret;
 }
 EXPORT_SYMBOL_GPL(iommu_map);
@@ -1081,12 +1187,15 @@ size_t iommu_unmap(struct iommu_domain *domain, unsigned long iova, size_t size)
 	size_t unmapped_page, unmapped = 0;
 	unsigned int min_pagesz;
 
+	trace_unmap_start(iova, 0, size);
 	if (unlikely(domain->ops->unmap == NULL ||
-		     domain->ops->pgsize_bitmap == 0UL))
+		     (domain->ops->pgsize_bitmap == 0UL &&
+		      !domain->ops->get_pgsize_bitmap))) {
+		trace_unmap_end(iova, 0, size);
 		return -ENODEV;
-
+	}
 	/* find out the minimum page size supported */
-	min_pagesz = 1 << __ffs(domain->ops->pgsize_bitmap);
+	min_pagesz = 1 << __ffs(iommu_get_pgsize_bitmap(domain));
 
 	/*
 	 * The virtual address, as well as the size of the mapping, must be
@@ -1096,6 +1205,7 @@ size_t iommu_unmap(struct iommu_domain *domain, unsigned long iova, size_t size)
 	if (!IS_ALIGNED(iova | size, min_pagesz)) {
 		pr_err("unaligned: iova 0x%lx size 0x%zx min_pagesz 0x%x\n",
 		       iova, size, min_pagesz);
+		trace_unmap_end(iova, 0, size);
 		return -EINVAL;
 	}
 
@@ -1106,9 +1216,9 @@ size_t iommu_unmap(struct iommu_domain *domain, unsigned long iova, size_t size)
 	 * or we hit an area that isn't mapped.
 	 */
 	while (unmapped < size) {
-		size_t pgsize = iommu_pgsize(domain, iova, size - unmapped);
+		size_t left = size - unmapped;
 
-		unmapped_page = domain->ops->unmap(domain, iova, pgsize);
+		unmapped_page = domain->ops->unmap(domain, iova, left);
 		if (!unmapped_page)
 			break;
 
@@ -1120,10 +1230,61 @@ size_t iommu_unmap(struct iommu_domain *domain, unsigned long iova, size_t size)
 	}
 
 	trace_unmap(iova, 0, size);
+	trace_unmap_end(iova, 0, size);
 	return unmapped;
 }
 EXPORT_SYMBOL_GPL(iommu_unmap);
 
+size_t default_iommu_map_sg(struct iommu_domain *domain, unsigned long iova,
+			 struct scatterlist *sg, unsigned int nents, int prot)
+{
+	int ret;
+	size_t mapped = 0;
+	unsigned int i;
+	struct scatterlist *s;
+
+	for_each_sg(sg, s, nents, i) {
+		phys_addr_t phys = page_to_phys(sg_page(s));
+		size_t page_len = s->offset + s->length;
+
+		ret = iommu_map(domain, iova + mapped, phys, page_len, prot);
+		if (ret) {
+			/* undo mappings already done */
+			iommu_unmap(domain, iova, mapped);
+			mapped = 0;
+			break;
+		}
+		mapped += page_len;
+	}
+
+	return mapped;
+}
+EXPORT_SYMBOL_GPL(default_iommu_map_sg);
+
+/* DEPRECATED */
+int iommu_map_range(struct iommu_domain *domain, unsigned long iova,
+		struct scatterlist *sg, size_t len, int prot)
+{
+	if (unlikely(domain->ops->map_range == NULL))
+		return -ENODEV;
+
+	BUG_ON(iova & (~PAGE_MASK));
+
+	return domain->ops->map_range(domain, iova, sg, len, prot);
+}
+EXPORT_SYMBOL_GPL(iommu_map_range);
+
+int iommu_unmap_range(struct iommu_domain *domain, unsigned long iova,
+		size_t len)
+{
+	if (unlikely(domain->ops->unmap_range == NULL))
+		return -ENODEV;
+
+	BUG_ON(iova & (~PAGE_MASK));
+
+	return domain->ops->unmap_range(domain, iova, len);
+}
+EXPORT_SYMBOL_GPL(iommu_unmap_range);
 
 int iommu_domain_window_enable(struct iommu_domain *domain, u32 wnd_nr,
 			       phys_addr_t paddr, u64 size, int prot)
@@ -1145,6 +1306,8 @@ void iommu_domain_window_disable(struct iommu_domain *domain, u32 wnd_nr)
 }
 EXPORT_SYMBOL_GPL(iommu_domain_window_disable);
 
+struct dentry *iommu_debugfs_top;
+
 static int __init iommu_init(void)
 {
 	iommu_group_kset = kset_create_and_add("iommu_groups",
@@ -1153,6 +1316,12 @@ static int __init iommu_init(void)
 	mutex_init(&iommu_group_mutex);
 
 	BUG_ON(!iommu_group_kset);
+
+	iommu_debugfs_top = debugfs_create_dir("iommu", NULL);
+	if (!iommu_debugfs_top) {
+		pr_err("Couldn't create iommu debugfs directory\n");
+		return -ENODEV;
+	}
 
 	return 0;
 }
@@ -1174,7 +1343,7 @@ int iommu_domain_get_attr(struct iommu_domain *domain,
 		break;
 	case DOMAIN_ATTR_PAGING:
 		paging  = data;
-		*paging = (domain->ops->pgsize_bitmap != 0UL);
+		*paging = (iommu_get_pgsize_bitmap(domain) != 0UL);
 		break;
 	case DOMAIN_ATTR_WINDOWS:
 		count = data;
@@ -1222,3 +1391,11 @@ int iommu_domain_set_attr(struct iommu_domain *domain,
 	return ret;
 }
 EXPORT_SYMBOL_GPL(iommu_domain_set_attr);
+
+int iommu_dma_supported(struct iommu_domain *domain, struct device *dev,
+								u64 mask)
+{
+	if (domain->ops->dma_supported)
+		return domain->ops->dma_supported(domain, dev, mask);
+	return 0;
+}

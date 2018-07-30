@@ -1,8 +1,8 @@
 config ARM
 	bool
 	default y
-	select ARCH_BINFMT_ELF_RANDOMIZE_PIE
 	select ARCH_HAS_ATOMIC64_DEC_IF_POSITIVE
+	select ARCH_HAS_ELF_RANDOMIZE
 	select ARCH_HAS_TICK_BROADCAST if GENERIC_CLOCKEVENTS_BROADCAST
 	select ARCH_HAVE_CUSTOM_GPIO_H
 	select ARCH_MIGHT_HAVE_PC_PARPORT
@@ -98,6 +98,20 @@ config ARM_DMA_USE_IOMMU
 	bool
 	select ARM_HAS_SG_CHAIN
 	select NEED_SG_DMA_LENGTH
+
+config EARLY_IOREMAP
+       bool "Provide early_ioremap() support for kernel initialization"
+       depends on MMU
+       select GENERIC_EARLY_IOREMAP
+       help
+         Provide a mechanism for kernel initialisation code to temporarily
+         map, in a highmem-agnostic way, memory pages in before ioremap()
+         and friends are available (before paging_init() has run). It uses
+         the same virtual memory range as kmap so all early mappings must
+         be unmapped before paging_init() is called.
+
+config FIX_EARLYCON_MEM
+	def_bool EARLY_IOREMAP
 
 if ARM_DMA_USE_IOMMU
 
@@ -217,6 +231,9 @@ config NEED_RET_TO_USER
 	bool
 
 config ARCH_MTD_XIP
+	bool
+
+config ARCH_WANT_KMAP_ATOMIC_FLUSH
 	bool
 
 config VECTORS_BASE
@@ -650,8 +667,19 @@ config ARCH_PXA
 config ARCH_MSM
 	bool "Qualcomm MSM (non-multiplatform)"
 	select ARCH_REQUIRE_GPIOLIB
-	select COMMON_CLK
+	select CLKDEV_LOOKUP
 	select GENERIC_CLOCKEVENTS
+	select GENERIC_ALLOCATOR
+	select HAVE_CLK
+	select HAVE_CLK_PREPARE
+	select ARCH_HAS_OPP
+	select SOC_BUS
+	select MULTI_IRQ_HANDLER
+	select PM_OPP
+	select SPARSE_IRQ
+	select USE_OF
+	select THERMAL_WRITABLE_TRIPS
+
 	help
 	  Support for Qualcomm MSM/QSD based systems.  This runs on the
 	  apps processor of the MSM/QSD and depends on a shared memory
@@ -1415,6 +1443,15 @@ config HAVE_ARM_TWD
 	help
 	  This options enables support for the ARM timer and watchdog unit
 
+config ARCH_MSM8953_SOC_SETTINGS
+	bool "Enable MSM8953 SOC settings"
+	depends on ARCH_MSM8953
+	help
+	  Enable generic MSM8953 related settings which are required for
+	  some of CPUSS sub-system functionality.
+
+	  If you are not sure what to do, select 'N' here.
+
 config MCPM
 	bool "Multi-Cluster Power Management"
 	depends on CPU_V7 && SMP
@@ -1511,7 +1548,7 @@ config ARM_PSCI
 # selected platforms.
 config ARCH_NR_GPIO
 	int
-	default 1024 if ARCH_SHMOBILE || ARCH_TEGRA
+	default 1024 if ARCH_SHMOBILE || ARCH_TEGRA || ARCH_MSM
 	default 512 if ARCH_EXYNOS || ARCH_KEYSTONE || SOC_OMAP5 || \
 		SOC_DRA7XX || ARCH_S3C24XX || ARCH_S3C64XX || ARCH_S5PV210
 	default 416 if ARCH_SUNXI
@@ -1731,6 +1768,29 @@ config ARCH_WANT_GENERAL_HUGETLB
 	def_bool y
 
 source "mm/Kconfig"
+
+choice
+	prompt "Virtual Memory Reclaim"
+	default NO_VM_RECLAIM
+	help
+	  Select the method of reclaiming virtual memory
+
+config ENABLE_VMALLOC_SAVING
+	bool "Reclaim memory for each subsystem"
+	help
+	  Enable this config to reclaim the virtual space belonging
+	  to any subsystem which is expected to have a lifetime of
+	  the entire system. This feature allows lowmem to be non-
+	  contiguous.
+
+config NO_VM_RECLAIM
+	bool "Do not reclaim memory"
+	help
+	  Do not reclaim any memory. This might result in less lowmem
+	  and wasting virtual memory space which could otherwise be
+	  reclaimed by using any of the other two config options.
+
+endchoice
 
 config FORCE_MAX_ZONEORDER
 	int "Maximum zone order" if ARCH_SHMOBILE_LEGACY
@@ -2092,6 +2152,17 @@ config AUTO_ZRELADDR
 	  0xf8000000. This assumes the zImage being placed in the first 128MB
 	  from start of memory.
 
+config ARM_DECOMPRESSOR_LIMIT
+	hex "Limit the decompressor memory area"
+	default 0x10000000
+	help
+	  Allows overriding of the memory size that decompressor maps with
+	  read, write and execute permissions to avoid speculative prefetch.
+
+	  By default ARM_DECOMPRESSOR_LIMIT maps first 1GB of memory
+	  with read, write and execute permissions and reset of the memory
+	  as strongly ordered.
+
 endmenu
 
 menu "CPU Power Management"
@@ -2222,6 +2293,9 @@ source "arch/arm/Kconfig.debug"
 source "security/Kconfig"
 
 source "crypto/Kconfig"
+if CRYPTO
+source "arch/arm/crypto/Kconfig"
+endif
 
 source "lib/Kconfig"
 

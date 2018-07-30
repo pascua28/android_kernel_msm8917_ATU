@@ -354,7 +354,7 @@ include $(srctree)/scripts/Kbuild.include
 # Make variables (CC, etc...)
 AS		= $(CROSS_COMPILE)as
 LD		= $(CROSS_COMPILE)ld
-CC		= $(CROSS_COMPILE)gcc
+REAL_CC		= $(CROSS_COMPILE)gcc
 CPP		= $(CC) -E
 AR		= $(CROSS_COMPILE)ar
 NM		= $(CROSS_COMPILE)nm
@@ -369,6 +369,10 @@ PERL		= perl
 PYTHON		= python
 CHECK		= sparse
 
+# Use the wrapper for the compiler.  This wrapper scans for new
+# warnings and causes the build to stop upon encountering them.
+CC		= $(srctree)/scripts/gcc-wrapper.py $(REAL_CC)
+
 CHECKFLAGS     := -D__linux__ -Dlinux -D__STDC__ -Dunix -D__unix__ \
 		  -Wbitwise -Wno-return-void $(CF)
 CFLAGS_MODULE   =
@@ -379,6 +383,21 @@ AFLAGS_KERNEL	=
 CFLAGS_GCOV	= -fprofile-arcs -ftest-coverage -fno-tree-loop-im
 CFLAGS_KCOV	= -fsanitize-coverage=trace-pc
 
+# Define macro to control the high low temperature compile
+ifeq ($(HLTHERM_RUNTEST),true)
+	CFLAGS_KERNEL += -DCONFIG_HLTHERM_RUNTEST
+	CFLAGS_KERNEL += -DCONFIG_HLTHERM_TEMP=$(HLTHERM_TEMP)
+endif
+
+# Define macro to control long press powerkey to reboot
+ifeq ($(DIS_LONG_PRESS_REBOOT),true)
+    CFLAGS_KERNEL += -DCONFIG_DIS_LONG_PRESS_REBOOT
+endif
+
+# Define macro to control nolog version
+ifeq ($(FINAL_RELEASE),true)
+    CFLAGS_KERNEL += -DCONFIG_FINAL_RELEASE
+endif
 
 # Use USERINCLUDE when you must reference the UAPI directories only.
 USERINCLUDE    := \
@@ -403,7 +422,8 @@ KBUILD_CFLAGS   := -Wall -Wundef -Wstrict-prototypes -Wno-trigraphs \
 		   -fno-strict-aliasing -fno-common \
 		   -Werror-implicit-function-declaration \
 		   -Wno-format-security \
-		   -std=gnu89
+		   -std=gnu89 \
+		   -w
 
 KBUILD_AFLAGS_KERNEL :=
 KBUILD_CFLAGS_KERNEL :=
@@ -686,6 +706,15 @@ ifdef CONFIG_KCOV
   endif
 endif
 
+#KBUILD_CFLAGS += -fplugin=$(srctree)/../../prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/libexec/gcc/aarch64-linux-android/4.9.x/cfi.so -fplugin-arg-cfi-logfault
+ifdef CONFIG_HUAWEI_CFI
+KBUILD_CFLAGS += -fplugin=$(srctree)/../../prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/libexec/gcc/aarch64-linux-android/4.9.x/cfi.so -fplugin-arg-cfi-abortfn=__cfi_report
+KBUILD_CFLAGS += -fplugin-arg-cfi-tagvalue=$(CONFIG_HUAWEI_CFI_TAG)
+ifeq ($(CONFIG_HUAWEI_CFI_DEBUG),y)
+KBUILD_CFLAGS += -DHW_SAVE_CFI_LOG
+endif
+endif
+
 ifeq ($(COMPILER),clang)
 KBUILD_CPPFLAGS += $(call cc-option,-Qunused-arguments,)
 KBUILD_CPPFLAGS += $(call cc-option,-Wno-unknown-warning-option,)
@@ -791,7 +820,9 @@ ifeq ($(shell $(CONFIG_SHELL) $(srctree)/scripts/gcc-goto.sh $(CC)), y)
 	KBUILD_CFLAGS += -DCC_HAVE_ASM_GOTO
 endif
 
+include $(srctree)/scripts/Makefile.kasan
 include $(srctree)/scripts/Makefile.extrawarn
+include $(srctree)/scripts/Makefile.ubsan
 
 # Add user supplied CPPFLAGS, AFLAGS and CFLAGS as the last assignments
 KBUILD_CPPFLAGS += $(KCPPFLAGS)
@@ -807,6 +838,9 @@ LDFLAGS_vmlinux += $(LDFLAGS_BUILD_ID)
 ifeq ($(CONFIG_STRIP_ASM_SYMS),y)
 LDFLAGS_vmlinux	+= $(call ld-option, -X,)
 endif
+
+LDFLAGS_vmlinux += $(call ld-option, --fix-cortex-a53-843419)
+LDFLAGS_MODULE += $(call ld-option, --fix-cortex-a53-843419)
 
 # Default kernel image to build when no specific target is given.
 # KBUILD_IMAGE may be overruled on the command line or

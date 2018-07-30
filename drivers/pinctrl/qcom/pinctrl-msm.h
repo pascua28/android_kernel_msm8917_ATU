@@ -70,11 +70,11 @@ struct msm_pingroup {
 	unsigned *funcs;
 	unsigned nfuncs;
 
-	s16 ctl_reg;
-	s16 io_reg;
-	s16 intr_cfg_reg;
-	s16 intr_status_reg;
-	s16 intr_target_reg;
+	u32 ctl_reg;
+	u32 io_reg;
+	u32 intr_cfg_reg;
+	u32 intr_status_reg;
+	u32 intr_target_reg;
 
 	unsigned mux_bit:5;
 
@@ -121,4 +121,5 @@ int msm_pinctrl_probe(struct platform_device *pdev,
 		      const struct msm_pinctrl_soc_data *soc_data);
 int msm_pinctrl_remove(struct platform_device *pdev);
 
+extern int msm_show_resume_irq_mask;
 #endif

@@ -22,12 +22,15 @@
 #include "blk-cgroup.h"
 #include "blk.h"
 
-#define MAX_KEY_LEN 100
-
+/*lint -save -e64 -e570 -e651 -e708 -e785*/
 static DEFINE_MUTEX(blkcg_pol_mutex);
+/*lint -restore*/
 
+/*lint -save -e785*/
 struct blkcg blkcg_root = { .cfq_weight = 2 * CFQ_WEIGHT_DEFAULT,
-			    .cfq_leaf_weight = 2 * CFQ_WEIGHT_DEFAULT, };
+			    .cfq_leaf_weight = 2 * CFQ_WEIGHT_DEFAULT,
+			    .weight = 2 * BLKIO_WEIGHT_DEFAULT, };
+/*lint -restore*/
 EXPORT_SYMBOL_GPL(blkcg_root);
 
 static struct blkcg_policy *blkcg_policy[BLKCG_MAX_POLS];
@@ -54,6 +57,7 @@ static void blkg_free(struct blkcg_gq *blkg)
 	for (i = 0; i < BLKCG_MAX_POLS; i++)
 		kfree(blkg->pd[i]);
 
+	percpu_counter_destroy(&blkg->nr_dirtied);
 	blk_exit_rl(&blkg->rl);
 	kfree(blkg);
 }
@@ -71,6 +75,7 @@ static struct blkcg_gq *blkg_alloc(struct blkcg *blkcg, struct request_queue *q,
 {
 	struct blkcg_gq *blkg;
 	int i;
+	int ret;
 
 	/* alloc and init base part */
 	blkg = kzalloc_node(sizeof(*blkg), gfp_mask, q->node);
@@ -81,6 +86,7 @@ static struct blkcg_gq *blkg_alloc(struct blkcg *blkcg, struct request_queue *q,
 	INIT_LIST_HEAD(&blkg->q_node);
 	blkg->blkcg = blkcg;
 	atomic_set(&blkg->refcnt, 1);
+	atomic_set(&blkg->writers, 0);
 
 	/* root blkg uses @q->root_rl, init rl only for !root blkgs */
 	if (blkcg != &blkcg_root) {
@@ -106,6 +112,11 @@ static struct blkcg_gq *blkg_alloc(struct blkcg *blkcg, struct request_queue *q,
 		pd->plid = i;
 	}
 
+	ret = percpu_counter_init(&blkg->nr_dirtied, (s64)0, gfp_mask);
+	if (ret)
+		goto err_free;
+
+	blkg->weight = blkcg->weight;
 	return blkg;
 
 err_free:
@@ -484,7 +495,7 @@ static int blkcg_reset_stats(struct cgroup_subsys_state *css,
 	return 0;
 }
 
-static const char *blkg_dev_name(struct blkcg_gq *blkg)
+const char *blkg_dev_name(struct blkcg_gq *blkg)
 {
 	/* some drivers (floppy) instantiate a queue w/o disk registered */
 	if (blkg->q->backing_dev_info.dev)
@@ -837,6 +848,7 @@ blkcg_css_alloc(struct cgroup_subsys_state *parent_css)
 	if (!blkcg)
 		return ERR_PTR(-ENOMEM);
 
+	blkcg->weight = BLKIO_WEIGHT_DEFAULT;
 	blkcg->cfq_weight = CFQ_WEIGHT_DEFAULT;
 	blkcg->cfq_leaf_weight = CFQ_WEIGHT_DEFAULT;
 done:
@@ -899,6 +911,63 @@ void blkcg_exit_queue(struct request_queue *q)
 	blk_throtl_exit(q);
 }
 
+#ifdef CONFIG_BLK_DEV_THROTTLING
+static void blkcg_attach(struct cgroup_subsys_state *css,
+			 struct cgroup_taskset *tset)
+{
+	struct task_struct *task;
+	struct blkcg *blkcg = css_to_blkcg(css);
+
+	spin_lock_irq(&blkcg->lock);
+	rcu_read_lock();
+
+	cgroup_taskset_for_each(task, tset) {
+		wake_up_process(task);
+		if (!task->mm)
+			continue;
+
+		if (!task->mm->io_limit)
+			continue;
+
+		if (task->mm->io_limit->max_inflights == blkcg->max_inflights)
+			continue;
+
+		blk_throtl_update_limit(task->mm->io_limit,
+					blkcg->max_inflights);
+	}
+
+	rcu_read_unlock();
+	spin_unlock_irq(&blkcg->lock);
+}
+
+static void blkcg_fork(struct task_struct *task)
+{
+	struct blkcg *blkcg;
+
+	if (task_css_is_root(task, blkio_cgrp_id))
+		return;
+
+	if (!task->mm)
+		return;
+
+	if (!task->mm->io_limit)
+		return;
+
+	rcu_read_lock();
+	blkcg = task_blkcg(task);
+	if (task->mm->io_limit->max_inflights == blkcg->max_inflights) {
+		rcu_read_unlock();
+		return;
+	}
+
+	spin_lock_irq(&blkcg->lock);
+	blk_throtl_update_limit(task->mm->io_limit,
+				blkcg->max_inflights);
+	spin_unlock_irq(&blkcg->lock);
+	rcu_read_unlock();
+}
+#endif
+
 /*
  * We cannot support shared io contexts, as we have no mean to support
  * two tasks with the same ioc in two different groups without major rework
@@ -924,12 +993,41 @@ static int blkcg_can_attach(struct cgroup_subsys_state *css,
 	}
 	return ret;
 }
+/*lint -restore*/
 
+static int blkcg_allow_attach(struct cgroup_subsys_state *css,
+			      struct cgroup_taskset *tset)
+{
+	/*lint -save -e50 -e64 -e529 -e666 -e1058*/
+	const struct cred *cred = current_cred(), *tcred;
+	struct task_struct *task;
+
+	cgroup_taskset_for_each(task, tset) {
+		tcred = __task_cred(task);
+
+		if ((current != task) && !capable(CAP_SYS_ADMIN) &&
+		    !uid_eq(cred->euid, tcred->uid) &&
+		    !uid_eq(cred->euid, tcred->suid))
+			return -EACCES;
+	}
+	/*lint -restore*/
+
+	return 0;
+/*lint -save -e715*/
+}
+/*lint -restore*/
+
+/*lint -save -e785*/
 struct cgroup_subsys blkio_cgrp_subsys = {
 	.css_alloc = blkcg_css_alloc,
 	.css_offline = blkcg_css_offline,
 	.css_free = blkcg_css_free,
 	.can_attach = blkcg_can_attach,
+#ifdef CONFIG_BLK_DEV_THROTTLING
+	.allow_attach = blkcg_allow_attach,
+	.attach = blkcg_attach,
+	.fork = blkcg_fork,
+#endif
 	.legacy_cftypes = blkcg_files,
 #ifdef CONFIG_MEMCG
 	/*

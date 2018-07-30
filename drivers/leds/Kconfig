@@ -446,6 +446,14 @@ config LEDS_TCA6507
 	  LED driver chips accessed via the I2C bus.
 	  Driver support brightness control and hardware-assisted blinking.
 
+config LEDS_TLC591XX
+	tristate "LED driver for TLC59108 and TLC59116 controllers"
+	depends on LEDS_CLASS && I2C
+	select REGMAP_I2C
+	help
+	  This option enables support for Texas Instruments TLC59108
+	  and TLC59116 LED controllers.
+
 config LEDS_MAX8997
 	tristate "LED support for MAX8997 PMIC"
 	depends on LEDS_CLASS && MFD_MAX8997
@@ -487,6 +495,36 @@ config LEDS_BLINKM
 	  This option enables support for the BlinkM RGB LED connected
 	  through I2C. Say Y to enable support for the BlinkM LED.
 
+config LEDS_QPNP
+	tristate "Support for QPNP LEDs"
+	depends on LEDS_CLASS && MSM_SPMI && OF_SPMI
+	help
+	  This driver supports the leds functionality of Qualcomm PNP PMIC.  It
+	  includes RGB Leds, WLED and Flash Led.
+
+	  To compile this driver as a module, choose M here: the module will
+	  be called leds-qpnp.
+
+config LEDS_QPNP_FLASH
+	tristate "Support for QPNP Flash LEDs"
+	depends on LEDS_CLASS && MSM_SPMI && OF_SPMI
+	help
+	  This driver supports the leds functionality of Qualcomm Technologies
+	  PNP PMIC.  It includes Flash Led.
+
+	  To compile this driver as a module, choose M here: the module will
+	  be called leds-qpnp-flash.
+
+config LEDS_QPNP_WLED
+	tristate "Support for QPNP WLED"
+	depends on LEDS_CLASS && MSM_SPMI && OF_SPMI
+	help
+	  This driver supports the WLED (White LED) functionality of
+	  Qualcomm Technologies PNP PMIC. WLED is used for display backlight.
+
+	  To compile this driver as a module, choose M here: the module will
+	  be called leds-qpnp-wled.
+
 config LEDS_SYSCON
 	bool "LED support for LEDs on system controllers"
 	depends on LEDS_CLASS=y
@@ -504,6 +542,20 @@ config LEDS_VERSATILE
 	help
 	  This option enabled support for the LEDs on the ARM Versatile
 	  and RealView boards. Say Y to enabled these.
+
+config LEDS_AW2013
+	tristate "LED support for AW2013"
+	depends on LEDS_CLASS && I2C
+	help
+	  This option enables support for the AW2013 RGB LED connected
+	  through I2C. Say Y to enable support for the AW2013 LED.
+	  
+config LEDS_AW2016
+	tristate "LED Support for AW2016"
+	depends on LEDS_CLASS && I2C
+	help
+		this option enables support for the AW2016 RGB LED connected
+		through I2C. Say Y to enable support for the AW2016 LED
 
 comment "LED Triggers"
 source "drivers/leds/trigger/Kconfig"

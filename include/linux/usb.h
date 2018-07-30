@@ -367,12 +367,13 @@ struct usb_bus {
 
 	int devnum_next;		/* Next open device number in
 					 * round-robin allocation */
-	struct mutex devnum_next_mutex; /* devnum_next mutex */
 
 	struct usb_devmap devmap;	/* device address allocation map */
 	struct usb_device *root_hub;	/* Root hub */
 	struct usb_bus *hs_companion;	/* Companion EHCI bus, if any */
 	struct list_head bus_list;	/* list of busses */
+
+	struct mutex usb_address0_mutex; /* unaddressed device mutex */
 
 	int bandwidth_allocated;	/* on this bus: how much of the time
 					 * reserved for periodic (intr/iso)
@@ -390,6 +391,15 @@ struct usb_bus {
 	struct mon_bus *mon_bus;	/* non-null when associated */
 	int monitored;			/* non-zero when monitored */
 #endif
+	unsigned skip_resume:1;		/* All USB devices are brought into full
+					 * power state after system resume. It
+					 * is desirable for some buses to keep
+					 * their devices in suspend state even
+					 * after system resume. The devices
+					 * are resumed later when a remote
+					 * wakeup is detected or an interface
+					 * driver starts I/O.
+					 */
 };
 
 struct usb_dev_state;
@@ -1059,7 +1069,7 @@ struct usbdrv_wrap {
  *	for interfaces bound to this driver.
  * @soft_unbind: if set to 1, the USB core will not kill URBs and disable
  *	endpoints before calling the driver's disconnect method.
- * @disable_hub_initiated_lpm: if set to 1, the USB core will not allow hubs
+ * @disable_hub_initiated_lpm: if set to 0, the USB core will not allow hubs
  *	to initiate lower power link state transitions when an idle timeout
  *	occurs.  Device-initiated USB 3.0 link PM will still be allowed.
  *
@@ -1479,6 +1489,7 @@ struct urb {
 	usb_complete_t complete;	/* (in) completion routine */
 	struct usb_iso_packet_descriptor iso_frame_desc[0];
 					/* (in) ISO ONLY */
+	void *priv_data;                /* (in) additional private data */
 };
 
 /* ----------------------------------------------------------------------- */
@@ -1876,8 +1887,11 @@ static inline int usb_translate_errors(int error_code)
 #define USB_DEVICE_REMOVE	0x0002
 #define USB_BUS_ADD		0x0003
 #define USB_BUS_REMOVE		0x0004
+#define USB_BUS_DIED		0x0005
 extern void usb_register_notify(struct notifier_block *nb);
 extern void usb_unregister_notify(struct notifier_block *nb);
+extern void usb_register_atomic_notify(struct notifier_block *nb);
+extern void usb_unregister_atomic_notify(struct notifier_block *nb);
 
 /* debugfs stuff */
 extern struct dentry *usb_debug_root;

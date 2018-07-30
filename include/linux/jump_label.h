@@ -133,6 +133,7 @@ extern int jump_label_text_reserved(void *start, void *end);
 extern void static_key_slow_inc(struct static_key *key);
 extern void static_key_slow_dec(struct static_key *key);
 extern void jump_label_apply_nops(struct module *mod);
+extern int jump_label_register(struct module *mod);
 
 #define STATIC_KEY_INIT_TRUE ((struct static_key)		\
 	{ .enabled = ATOMIC_INIT(1),				\
@@ -186,7 +187,10 @@ static inline int jump_label_apply_nops(struct module *mod)
 {
 	return 0;
 }
-
+static inline int jump_label_register(struct module *mod)
+{
+       return 0;
+}
 #define STATIC_KEY_INIT_TRUE ((struct static_key) \
 		{ .enabled = ATOMIC_INIT(1) })
 #define STATIC_KEY_INIT_FALSE ((struct static_key) \
