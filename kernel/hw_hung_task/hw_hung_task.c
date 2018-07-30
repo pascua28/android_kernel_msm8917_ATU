@@ -12,7 +12,7 @@
 #include <trace/events/sched.h>
 
 #ifdef CONFIG_HW_DETECT_HUNG_TASK
-#include <hw_hung_task.h>
+#include "hw_hung_task.h"
 #include <linux/proc_fs.h>
 #include <linux/errno.h>
 #include <linux/uaccess.h>

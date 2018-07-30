@@ -1,5 +1,5 @@
 #include <linux/notifier.h>
-#include "tpkit_platform_adapter.h"
+#include "../tpkit_platform_adapter.h"
 #ifdef CONFIG_HUAWEI_HW_DEV_DCT
 #include <linux/hw_dev_dec.h>
 #endif

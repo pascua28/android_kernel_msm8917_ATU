@@ -1,4 +1,4 @@
-#include "msm_flash.h"
+#include "../msm_flash.h"
 
 int32_t hw_flash_i2c_sy7806e_init(struct msm_flash_ctrl_t *flash_ctrl,
 		struct msm_flash_cfg_data_t *flash_data);
