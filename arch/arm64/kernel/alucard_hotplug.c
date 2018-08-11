@@ -378,7 +378,7 @@ static int hotplug_start(void)
 	unsigned int cpu;
 	int ret = 0;
 
-	alucardhp_wq = alloc_workqueue("alucardhp_wq", WQ_HIGHPRI, 0);
+	alucardhp_wq = alloc_workqueue("alucardhp_wq", WQ_HIGHPRI, WQ_POWER_EFFICIENT, 0);
 
 	if (!alucardhp_wq) {
 		printk(KERN_ERR "Failed to create alucard hotplug workqueue\n");
