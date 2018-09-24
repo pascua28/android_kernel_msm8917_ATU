@@ -644,7 +644,7 @@ config MAX_STACK_SIZE_MB
 config ZCACHE
        bool "Compressed cache for file pages (EXPERIMENTAL)"
        depends on CRYPTO && CLEANCACHE
-       select CRYPTO_LZO
+       select CRYPTO_LZ4
        select ZBUD
        default n
        help
