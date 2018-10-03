@@ -422,7 +422,6 @@ KBUILD_CFLAGS   := -Wall -Wundef -Wstrict-prototypes -Wno-trigraphs \
 		   -w
 
 KBUILD_CFLAGS   += -march=armv8-a -mcpu=cortex-a53 -mtune=cortex-a53
-KBUILD_CFLAGS   += -O2 -finline-functions
 KBUILD_AFLAGS_KERNEL :=
 KBUILD_CFLAGS_KERNEL :=
 KBUILD_AFLAGS   := -D__ASSEMBLY__
