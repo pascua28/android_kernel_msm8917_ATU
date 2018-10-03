@@ -1672,6 +1672,8 @@ static ssize_t reclaim_write(struct file *file, const char __user *buf,
 	mm = get_task_mm(task);
 	if (!mm)
 		goto out;
+
+#ifdef CONFIG_HISI_SMART_RECLAIM
 	//here we add a soft shrinker for reclaim
 	if (type == RECLAIM_SOFT) {
 		smart_soft_shrink(mm);
@@ -1681,6 +1683,7 @@ static ssize_t reclaim_write(struct file *file, const char __user *buf,
 
 	if (type == RECLAIM_INACTIVE)
 		rp.inactive_lru = true;
+#endif
 
 	reclaim_walk.mm = mm;
 	reclaim_walk.pmd_entry = reclaim_pte_range;
