@@ -970,6 +970,7 @@ int msm_post_event(struct v4l2_event *event, int timeout)
 			pr_err("%s: Timed out\n", __func__);
 			msm_print_event_error(event);
 #ifdef CONFIG_HUAWEI_DSM
+extern bool runmode_is_factory(void);
 if(!runmode_is_factory())
 {
 			memset(camera_dsm_log_buff, 0, MSM_CAMERA_DSM_BUFFER_SIZE);
