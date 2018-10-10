@@ -28,7 +28,7 @@
 #include <linux/uaccess.h>
 #include <linux/delay.h>
 #include <linux/interrupt.h>
-
+#include <linux/reboot.h>
 #include <linux/gpio.h>
 #include <linux/spinlock.h>
 #include <linux/of_gpio.h>
