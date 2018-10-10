@@ -522,6 +522,8 @@ enum himax_event_id {
 	HIMAX_EV_LIFTOFF,
 };
 
+#define CONFIG_TOUCHSCREEN_HIMAX_DEBUG 1
+
 #if defined(CONFIG_TOUCHSCREEN_HIMAX_DEBUG)
 
 	extern uint8_t hx_nc_diag_coor[HX_RECEIVE_BUF_MAX_SIZE];

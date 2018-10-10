@@ -26,6 +26,7 @@
 #include <linux/delay.h>
 
 #include "goodix_ts.h"
+#include "goodix_dts.h"
 
 #define GT9XX_FW_NAME "gt9xx.BIN"
 
@@ -2200,6 +2201,7 @@ exit_burn_fw_finish:
     return FAIL;
 }
 
+extern int goodix_param_init(void);
 int gup_chip_reinit(struct goodix_ts_data *ts)
 {
 	int ret = 0;
