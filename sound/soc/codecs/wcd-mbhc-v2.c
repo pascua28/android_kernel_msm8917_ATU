@@ -2360,6 +2360,8 @@ static void wcd_mbhc_moisture_config(struct wcd_mbhc *mbhc)
 				mbhc->mbhc_cfg->moist_cfg.m_iref_ctl);
 }
 
+extern bool runmode_is_factory(void);
+
 static int wcd_mbhc_initialise(struct wcd_mbhc *mbhc)
 {
 	int ret = 0;
