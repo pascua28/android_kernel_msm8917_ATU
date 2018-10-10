@@ -25,6 +25,8 @@
 #include <linux/delay.h>
 #include <linux/qpnp/power-on.h>
 #include <linux/of_address.h>
+#include <linux/syscalls.h>
+#include <linux/sched.h>
 
 #include <asm/cacheflush.h>
 #include <asm/system_misc.h>
