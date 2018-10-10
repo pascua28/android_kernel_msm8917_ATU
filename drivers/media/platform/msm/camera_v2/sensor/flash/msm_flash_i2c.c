@@ -20,6 +20,7 @@
 #include "msm_camera_io_util.h"
 #include "aw36413_lib.h"
 #include "sy7806e_lib.h"
+#include "../io/msm_camera_dt_util.h"
 
 #undef CDBG
 #define CDBG(fmt, args...) pr_err(fmt, ##args)
