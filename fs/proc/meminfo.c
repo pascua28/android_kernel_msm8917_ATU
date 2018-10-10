@@ -18,6 +18,7 @@
 #include <asm/page.h>
 #include <asm/pgtable.h>
 #include "internal.h"
+#include "../drivers/staging/android/ion/ion.h"
 
 #ifdef CONFIG_HUAWEI_UNMOVABLE_ISOLATE
 #include <linux/unmovable_isolate.h>
