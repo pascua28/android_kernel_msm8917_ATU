@@ -1876,6 +1876,11 @@ end_io:
  * a lower device by calling into generic_make_request recursively, which
  * means the bio should NOT be touched after the call to ->make_request_fn.
  */
+ 
+ #ifdef CONFIG_HW_SYSTEM_WR_PROTECT
+extern int should_trap_this_bio(int rw, struct bio *bio, unsigned int count);
+#endif
+
 void generic_make_request(struct bio *bio)
 {
 	struct bio_list bio_list_on_stack;
