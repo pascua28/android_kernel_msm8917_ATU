@@ -313,6 +313,5 @@ int __init hw_buildin_module_init ( void)
     mutex_init(&wifi_enable_write_mutex);
 	return 0;
 }
-
 #endif    //#ifdef CONFIG_HUAWEI_WIFI_BUILTIN
 

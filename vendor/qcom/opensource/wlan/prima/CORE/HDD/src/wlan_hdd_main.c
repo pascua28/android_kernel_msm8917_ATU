@@ -13364,6 +13364,7 @@ static int __init hdd_module_init ( void)
    return hdd_driver_init();
 }
 #else /* #ifdef MODULE */
+extern int hw_buildin_module_init(void);
 static int __init hdd_module_init ( void)
 {
    return hw_buildin_module_init ();
