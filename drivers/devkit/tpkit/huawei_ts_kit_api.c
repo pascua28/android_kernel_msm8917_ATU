@@ -28,6 +28,7 @@
 #include "huawei_ts_kit_api.h"
 #include "tpkit_platform_adapter.h"
 #include "../lcdkit/include/lcdkit_ext.h"
+#include <linux/vmalloc.h>
 
 #if defined (CONFIG_HUAWEI_DSM)
 #include <dsm/dsm_pub.h>
