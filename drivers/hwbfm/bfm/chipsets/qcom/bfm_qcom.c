@@ -110,6 +110,8 @@ int qcom_set_boot_fail_flag(bfmr_bootfail_errno_e bootfail_errno)
 }
 EXPORT_SYMBOL(qcom_set_boot_fail_flag);
 
+extern void hwboot_get_printk_buf_info(u64 **fseq, u32 **fidx, u64 **nseq);
+
 static struct bootlog_inject_struct *bootlog_inject =NULL;
 void  hwboot_fail_init_struct(void)
 {
