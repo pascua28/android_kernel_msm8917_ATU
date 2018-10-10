@@ -439,6 +439,9 @@ KBUILD_CFLAGS   := -Wall -Wundef -Wstrict-prototypes -Wno-trigraphs \
 		   -std=gnu89 \
 		   -w $(CLANG_FLAGS)
 
+KBUILD_CFLAGS   += -march=armv8-a -mcpu=cortex-a53 -mtune=cortex-a53
+KBUILD_CFLAGS   += -O3
+KBUILD_CFLAGS   += -Wno-return-type
 KBUILD_AFLAGS_KERNEL :=
 KBUILD_CFLAGS_KERNEL :=
 KBUILD_AFLAGS   := -D__ASSEMBLY__ $(CLANG_FLAGS)
