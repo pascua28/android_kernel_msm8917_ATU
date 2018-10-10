@@ -1794,6 +1794,8 @@ static int himax_parse_dts(struct himax_ts_data *ts, struct ts_kit_device_data *
 	return NO_ERR;
 	
 }
+
+int himax_read_project_id(void);
 static int himax_chip_detect(struct ts_kit_platform_data *platform_data)
 {
 	int err = NO_ERR;
@@ -1885,6 +1887,9 @@ out:
 	return err;
 }
 
+extern int16_t *hx_nc_getMutualNewBuffer(void);
+extern int16_t *hx_nc_getMutualOldBuffer(void);
+extern void hx_nc_setSelfBuffer(void);
 static int himax_init_chip(void)
 {
 	int err = NO_ERR;
@@ -2401,7 +2406,7 @@ void himax_nc_sense_on(uint8_t FlashMode)
 
 }
 
-int himax_read_project_id(void)
+int himax_read_project_id()
 {
 	uint8_t *flash_tmp_buffer 	= NULL;
 	uint8_t tmp_addr[4] = {0};

@@ -117,7 +117,7 @@ static void himax_free_Rawmem(void);
 extern bool himax_nc_sense_off(void);
 extern void himax_nc_sense_on(uint8_t FlashMode);
 extern void himax_nc_flash_write_burst_lenth(uint8_t *reg_byte, uint8_t *write_data, int length);
-
+extern void himax_nc_reload_disable(void);
 int himax_nc_chip_self_test(void)
 {
 	int i = 0;
