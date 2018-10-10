@@ -130,6 +130,8 @@
 #define SOC_DESCEND_RANGE1 1
 #define SOC_DESCEND_RANGE2 2
 
+extern void cap_learning_event_done_notify(void);
+extern void cap_charge_done_event_notify(void);
 
 static int profile_ID = 0;
 static int get_cycle_mark = 0;
