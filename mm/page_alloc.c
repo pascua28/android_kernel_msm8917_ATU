@@ -79,6 +79,8 @@
 #include "hisi/slowpath_count.h"
 #endif
 
+#include "../drivers/staging/android/ion/ion.h"
+
 /* prevent >1 _updater_ of zone percpu pageset ->high and ->batch fields */
 static DEFINE_MUTEX(pcp_batch_high_lock);
 #define MIN_PERCPU_PAGELIST_FRACTION	(8)
