@@ -319,6 +319,7 @@ void hwboot_get_printk_buf_info(u64 **fseq, u32 **fidx, u64 **nseq)
    *nseq = &log_next_seq;
    return;
 }
+EXPORT_SYMBOL(hwboot_get_printk_buf_info);
 
 /* Return log buffer address */
 char *log_buf_addr_get(void)

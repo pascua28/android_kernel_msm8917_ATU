@@ -2535,6 +2535,8 @@ static irqreturn_t msm_dwc3_pwr_irq(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
+
+extern int qusb_phy_usbin_voltage_now(struct usb_phy *phy);
 static int dwc3_msm_power_get_property_usb(struct power_supply *psy,
 				  enum power_supply_property psp,
 				  union power_supply_propval *val)
