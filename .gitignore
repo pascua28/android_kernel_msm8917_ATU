@@ -282,3 +282,4 @@ security/selinux/flask.h
 usr/gen_init_cpio
 drivers/platform/msm/ipa/ipa_common
 *.ll
+*.dtb
