@@ -1042,7 +1042,7 @@ ENDPROC(__kvm_flush_vm_context)
 
 	// struct vgic_sr_vectors __vgi_sr_vectors;
 	.align 3
-ENTRY_NOTAG(__vgic_sr_vectors)
+ENTRY(__vgic_sr_vectors)
 	.skip	VGIC_SR_VECTOR_SZ
 ENDPROC(__vgic_sr_vectors)
 
@@ -1251,7 +1251,7 @@ el1_irq:
 
 	.align 11
 
-ENTRY_NOTAG(__kvm_hyp_vector)
+ENTRY(__kvm_hyp_vector)
 	ventry	el2t_sync_invalid		// Synchronous EL2t
 	ventry	el2t_irq_invalid		// IRQ EL2t
 	ventry	el2t_fiq_invalid		// FIQ EL2t

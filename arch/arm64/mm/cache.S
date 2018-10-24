@@ -157,7 +157,7 @@ ENTRY(flush_icache_range)
  *	- start   - virtual start address of region
  *	- end     - virtual end address of region
  */
-ENTRY_NOTAG(__flush_cache_user_range)
+ENTRY(__flush_cache_user_range)
 	uaccess_ttbr0_enable x2, x3
 	dcache_line_size x2, x3
 	sub	x3, x2, #1
@@ -220,7 +220,7 @@ ENTRY(__inval_cache_range)
  *	- start   - virtual start address of region
  *	- end     - virtual end address of region
  */
-ENTRY_NOTAG(__dma_inv_range)
+ENTRY(__dma_inv_range)
 	dcache_line_size x2, x3
 	sub	x3, x2, #1
 	tst	x1, x3				// end cache line aligned?

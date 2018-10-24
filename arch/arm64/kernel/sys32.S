@@ -111,5 +111,5 @@ ENDPROC(compat_sys_fallocate_wrapper)
  * The system calls table must be 4KB aligned.
  */
 	.align	12
-ENTRY_NOTAG(compat_sys_call_table)
+ENTRY(compat_sys_call_table)
 #include <asm/unistd32.h>
