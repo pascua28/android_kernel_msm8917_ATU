@@ -69,7 +69,7 @@
 					dev = "/dev/block/platform/soc/7824900.sdhci/by-name/system";
 					type = "ext4";
 					mnt_flags = "ro,barrier=1,discard";
-					fsmgr_flags = "wait,verify";
+					fsmgr_flags = "wait";
 					status = "ok";
 				};
 				odm {
@@ -2018,7 +2018,7 @@
 			/* TURBO */
 			qcom,gpu-pwrlevel@0 {
 				reg = <0>;
-				qcom,gpu-freq = <598000000>;
+				qcom,gpu-freq = <650000000>;
 				qcom,bus-freq = <7>;
 				qcom,bus-min = <7>;
 				qcom,bus-max = <7>;

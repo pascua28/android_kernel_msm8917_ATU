@@ -1,5 +1,0 @@
-#include "huawei-battery.dtsi"
-#include "huawei-tp.dtsi"
-#include "huawei-lcd.dtsi"
-#include "huawei-camera.dtsi"
-#include "huawei-usb.dtsi"
