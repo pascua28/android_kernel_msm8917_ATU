@@ -109,7 +109,6 @@ irqreturn_t hw_vsync_handler(int irq, void *data)
 
 	return IRQ_HANDLED;
 }
-#ifndef CONFIG_LCDKIT_DRIVER
 
 /*
  * disable_esd_thread() - Cancels work item for the esd check.
@@ -121,6 +120,7 @@ void disable_esd_thread(void)
 			pr_debug("esd thread killed\n");
 }
 
+#ifndef CONFIG_LCDKIT_DRIVER
 /*
  * fb_event_callback() - Call back function for the fb_register_client()
  *			 notifying events
