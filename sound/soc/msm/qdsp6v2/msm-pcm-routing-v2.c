@@ -57,6 +57,10 @@ static int pri_mi2s_switch_enable;
 static int sec_mi2s_switch_enable;
 static int tert_mi2s_switch_enable;
 static int quat_mi2s_switch_enable;
+/* Add "quat_mi2s_switch_enable_for_fm" switch status flag for
+ * play-fm speaker usecase, routing fm signal form pri to quat
+ * PRI_MI2S_DL_HL -> QUAT_MI2S_RX_DL_HL_FOR_FM -> QUAT_MI2S_RX */
+static int quat_mi2s_switch_enable_for_fm;
 static int fm_pcmrx_switch_enable;
 static int lsm_port_index;
 static int slim0_rx_aanc_fb_port;
@@ -2050,6 +2054,41 @@ static int msm_routing_put_quat_mi2s_switch_mixer(
 	quat_mi2s_switch_enable = ucontrol->value.integer.value[0];
 	return 1;
 }
+
+/* Add "QUAT_MI2S_RX_DL_HL_FOR_FM Switch" switch control for
+ * play-fm speaker usecase, routing fm signal form pri to quat
+ * PRI_MI2S_DL_HL -> QUAT_MI2S_RX_DL_HL_FOR_FM -> QUAT_MI2S_RX */
+static int msm_routing_get_quat_mi2s_switch_mixer_for_fm(
+				struct snd_kcontrol *kcontrol,
+				struct snd_ctl_elem_value *ucontrol)
+{
+	ucontrol->value.integer.value[0] = quat_mi2s_switch_enable_for_fm;
+	pr_debug("%s: QUAT MI2S Switch enable for fm, value=%ld\n", __func__,
+		ucontrol->value.integer.value[0]);
+	return 0;
+}
+
+static int msm_routing_put_quat_mi2s_switch_mixer_for_fm(
+				struct snd_kcontrol *kcontrol,
+				struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_dapm_widget_list *wlist =
+			dapm_kcontrol_get_wlist(kcontrol);
+	struct snd_soc_dapm_widget *widget = wlist->widgets[0];
+	struct snd_soc_dapm_update *update = NULL;
+
+	pr_debug("%s: QUAT MI2S Switch enable for fm, value=%ld\n", __func__,
+			ucontrol->value.integer.value[0]);
+	if (ucontrol->value.integer.value[0])
+	snd_soc_dapm_mixer_update_power(widget->dapm, kcontrol, 1,
+			update);
+	else
+	snd_soc_dapm_mixer_update_power(widget->dapm, kcontrol, 0,
+			update);
+	quat_mi2s_switch_enable_for_fm = ucontrol->value.integer.value[0];
+	return 1;
+}
+/* end modify */
 
 static int msm_routing_get_fm_pcmrx_switch_mixer(struct snd_kcontrol *kcontrol,
 				struct snd_ctl_elem_value *ucontrol)
@@ -9081,6 +9120,9 @@ static const struct snd_kcontrol_new sec_mi2s_rx_port_mixer_controls[] = {
 	SOC_SINGLE_EXT("AUX_PCM_UL_TX", MSM_BACKEND_DAI_SECONDARY_MI2S_RX,
 	MSM_BACKEND_DAI_AUXPCM_TX, 1, 0, msm_routing_get_port_mixer,
 	msm_routing_put_port_mixer),
+	SOC_SINGLE_EXT("INTERNAL_FM_TX", MSM_BACKEND_DAI_SECONDARY_MI2S_RX,
+	MSM_BACKEND_DAI_INT_FM_TX, 1, 0, msm_routing_get_port_mixer,
+	msm_routing_put_port_mixer),
 };
 
 static const struct snd_kcontrol_new lsm1_mixer_controls[] = {
@@ -9372,6 +9414,14 @@ static const struct snd_kcontrol_new quat_mi2s_rx_switch_mixer_controls =
 	SOC_SINGLE_EXT("Switch", SND_SOC_NOPM,
 	0, 1, 0, msm_routing_get_quat_mi2s_switch_mixer,
 	msm_routing_put_quat_mi2s_switch_mixer);
+
+/* Add "QUAT_MI2S_RX_DL_HL_FOR_FM Switch" switch control for
+ * play-fm speaker usecase, routing fm signal form pri to quat
+ * PRI_MI2S_DL_HL -> QUAT_MI2S_RX_DL_HL_FOR_FM -> QUAT_MI2S_RX */
+static const struct snd_kcontrol_new quat_mi2s_rx_switch_mixer_controls_for_fm =
+	SOC_SINGLE_EXT("Switch", SND_SOC_NOPM,
+	0, 1, 0, msm_routing_get_quat_mi2s_switch_mixer_for_fm,
+	msm_routing_put_quat_mi2s_switch_mixer_for_fm);
 
 static const struct snd_kcontrol_new hfp_pri_aux_switch_mixer_controls =
 	SOC_SINGLE_EXT("Switch", SND_SOC_NOPM,
@@ -10268,6 +10318,26 @@ static const struct snd_kcontrol_new mi2s_rx_vi_fb_mux =
 	mi2s_rx_vi_fb_mux_enum, spkr_prot_get_vi_lch_port,
 	spkr_prot_put_vi_lch_port);
 
+#if defined(CONFIG_SND_SOC_TFA98XX) || defined(CONFIG_SND_SOC_TAS2560)
+static const char * const quat_mi2s_rx_vi_fb_tx_mux_text[] = {
+	"ZERO", "QUAT_MI2S_TX"
+};
+
+static const int const quat_mi2s_rx_vi_fb_tx_value[] = {
+	MSM_BACKEND_DAI_MAX, MSM_BACKEND_DAI_QUATERNARY_MI2S_TX
+};
+
+static const struct soc_enum quat_mi2s_rx_vi_fb_mux_enum =
+	SOC_VALUE_ENUM_DOUBLE(0, MSM_BACKEND_DAI_QUATERNARY_MI2S_RX, 0, 0,
+	ARRAY_SIZE(quat_mi2s_rx_vi_fb_tx_mux_text),
+	quat_mi2s_rx_vi_fb_tx_mux_text, quat_mi2s_rx_vi_fb_tx_value);
+
+static const struct snd_kcontrol_new quat_mi2s_rx_vi_fb_mux =
+	SOC_DAPM_ENUM_EXT("QUAT_MI2S_RX_VI_FB_MUX",
+	quat_mi2s_rx_vi_fb_mux_enum, spkr_prot_get_vi_lch_port,
+	spkr_prot_put_vi_lch_port);
+#endif
+
 static const struct snd_soc_dapm_widget msm_qdsp6_widgets[] = {
 	/* Frontend AIF */
 	/* Widget name equals to Front-End DAI name<Need confirmation>,
@@ -10858,6 +10928,11 @@ static const struct snd_soc_dapm_widget msm_qdsp6_widgets[] = {
 				&tert_mi2s_rx_switch_mixer_controls),
 	SND_SOC_DAPM_SWITCH("QUAT_MI2S_RX_DL_HL", SND_SOC_NOPM, 0, 0,
 				&quat_mi2s_rx_switch_mixer_controls),
+	/* Add "QUAT_MI2S_RX_DL_HL_FOR_FM Switch" switch control for
+	* play-fm speaker usecase, routing fm signal form pri to quat
+	* PRI_MI2S_DL_HL -> QUAT_MI2S_RX_DL_HL_FOR_FM -> QUAT_MI2S_RX */
+	SND_SOC_DAPM_SWITCH("QUAT_MI2S_RX_DL_HL_FOR_FM", SND_SOC_NOPM, 0, 0,
+				&quat_mi2s_rx_switch_mixer_controls_for_fm),
 	SND_SOC_DAPM_SWITCH("HFP_PRI_AUX_UL_HL", SND_SOC_NOPM, 0, 0,
 				&hfp_pri_aux_switch_mixer_controls),
 	SND_SOC_DAPM_SWITCH("HFP_AUX_UL_HL", SND_SOC_NOPM, 0, 0,
@@ -11242,6 +11317,10 @@ static const struct snd_soc_dapm_widget msm_qdsp6_widgets[] = {
 				&slim0_rx_vi_fb_rch_mux),
 	SND_SOC_DAPM_MUX("PRI_MI2S_RX_VI_FB_MUX", SND_SOC_NOPM, 0, 0,
 				&mi2s_rx_vi_fb_mux),
+#if defined(CONFIG_SND_SOC_TFA98XX) || defined(CONFIG_SND_SOC_TAS2560)
+	SND_SOC_DAPM_MUX("QUAT_MI2S_RX_VI_FB_MUX", SND_SOC_NOPM, 0, 0,
+				&quat_mi2s_rx_vi_fb_mux),
+#endif
 
 	SND_SOC_DAPM_MUX("VOC_EXT_EC MUX", SND_SOC_NOPM, 0, 0,
 			 &voc_ext_ec_mux),
@@ -12880,6 +12959,11 @@ static const struct snd_soc_dapm_route intercon[] = {
 	{"TERT_MI2S_RX_DL_HL", "Switch", "TERT_MI2S_DL_HL"},
 	{"TERT_MI2S_RX", NULL, "TERT_MI2S_RX_DL_HL"},
 
+	/* Add "QUAT_MI2S_RX_DL_HL_FOR_FM Switch" switch control for
+	* play-fm speaker usecase, routing fm signal form pri to quat
+	* PRI_MI2S_DL_HL -> QUAT_MI2S_RX_DL_HL_FOR_FM -> QUAT_MI2S_RX */
+	{"QUAT_MI2S_RX_DL_HL_FOR_FM", "Switch", "PRI_MI2S_DL_HL"},
+	{"QUAT_MI2S_RX", NULL, "QUAT_MI2S_RX_DL_HL_FOR_FM"},
 	{"QUAT_MI2S_RX_DL_HL", "Switch", "QUAT_MI2S_DL_HL"},
 	{"QUAT_MI2S_RX", NULL, "QUAT_MI2S_RX_DL_HL"},
 	{"MI2S_UL_HL", NULL, "TERT_MI2S_TX"},
@@ -13453,6 +13537,10 @@ static const struct snd_soc_dapm_route intercon[] = {
 	{"SLIMBUS_0_RX", NULL, "SLIM0_RX_VI_FB_LCH_MUX"},
 	{"SLIMBUS_0_RX", NULL, "SLIM0_RX_VI_FB_RCH_MUX"},
 	{"PRI_MI2S_RX", NULL, "PRI_MI2S_RX_VI_FB_MUX"},
+#if defined(CONFIG_SND_SOC_TFA98XX) || defined(CONFIG_SND_SOC_TAS2560)
+	{"QUAT_MI2S_RX_VI_FB_MUX", "QUAT_MI2S_TX", "QUAT_MI2S_TX"},
+	{"QUAT_MI2S_RX", NULL, "QUAT_MI2S_RX_VI_FB_MUX"},
+#endif
 	{"PRI_TDM_TX_0", NULL, "BE_IN"},
 	{"PRI_TDM_TX_1", NULL, "BE_IN"},
 	{"PRI_TDM_TX_2", NULL, "BE_IN"},
