@@ -16,7 +16,6 @@
 #include <asm/uaccess.h>
 #include <asm/page.h>
 
-#define PAGE_ALLOC_COUNT    4
 
 /*
  * seq_files have a buffer which can may overflow. When this happens a larger
@@ -37,23 +36,9 @@ static void *seq_buf_alloc(unsigned long size)
 {
 	void *buf;
 
-	gfp_t gfp = GFP_KERNEL;
-
-	/*
-	 * use vmalloc allocations directly for more than 16KB size.
-	 */
-	if (size > PAGE_ALLOC_COUNT * PAGE_SIZE) {
+	buf = kmalloc(size, GFP_KERNEL | __GFP_NOWARN);
+	if (!buf && size > PAGE_SIZE)
 		buf = vmalloc(size);
-	} else  {
-		if (size > PAGE_SIZE)
-			gfp |= __GFP_NORETRY | __GFP_NOWARN;
-
-		buf = kmalloc(size, gfp);
-
-		if (!buf && size > PAGE_SIZE)
-			buf = vmalloc(size);
-	}
-
 	return buf;
 }
 
@@ -84,10 +69,9 @@ int seq_open(struct file *file, const struct seq_operations *op)
 	memset(p, 0, sizeof(*p));
 	mutex_init(&p->lock);
 	p->op = op;
-
-	// No refcounting: the lifetime of 'p' is constrained
-	// to the lifetime of the file.
-	p->file = file;
+#ifdef CONFIG_USER_NS
+	p->user_ns = file->f_cred->user_ns;
+#endif
 
 	/*
 	 * Wrappers around seq_open(e.g. swaps_open) need to be
