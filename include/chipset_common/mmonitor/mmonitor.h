@@ -7,10 +7,6 @@
 #include <linux/atomic.h>
 #include <linux/errno.h>
 
-#ifdef CONFIG_HISI_SLOW_PATH_COUNT
-#include "hisi/slowpath_count.h"
-#endif
-
 #ifdef CONFIG_HW_MEMORY_MONITOR
 #define MMONITOR_PROC_FILE	"mmonitor"
 #define MMONITOR_MAX_STR_LEN 512

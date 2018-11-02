@@ -75,10 +75,6 @@
 #include <chipset_common/allocpages_delayacct/allocpages_delayacct.h>
 #endif
 
-#ifdef CONFIG_HISI_SLOW_PATH_COUNT
-#include "hisi/slowpath_count.h"
-#endif
-
 #include "../drivers/staging/android/ion/ion.h"
 
 /* prevent >1 _updater_ of zone percpu pageset ->high and ->batch fields */
@@ -3008,9 +3004,6 @@ rebalance:
 		migration_mode = MIGRATE_SYNC_LIGHT;
 
 	/* Try direct reclaim and then allocating */
-#ifdef CONFIG_HISI_SLOW_PATH_COUNT
-	pgalloc_count_inc(1, order);
-#endif
 	page = __alloc_pages_direct_reclaim(gfp_mask, order,
 					zonelist, high_zoneidx,
 					nodemask,
@@ -3114,9 +3107,6 @@ __alloc_pages_nodemask(gfp_t gfp_mask, unsigned int order,
 	unsigned int cpuset_mems_cookie;
 	int alloc_flags = ALLOC_WMARK_LOW|ALLOC_CPUSET|ALLOC_FAIR;
 	int classzone_idx;
-#ifdef CONFIG_HISI_SLOW_PATH_COUNT
-	pgalloc_count_inc(0, order);
-#endif
 	gfp_mask &= gfp_allowed_mask;
 
 	lockdep_trace_alloc(gfp_mask);

@@ -46,14 +46,6 @@ static void mmonitor_calcu_events(unsigned long *ret)
 static void mmonitor_clear_events(void)
 {
 	unsigned int i, cpu;
-#ifdef CONFIG_HISI_SLOW_PATH_COUNT
-	atomic_long_set(&pgalloc_count, 0);
-	atomic_long_set(&slowpath_pgalloc_count[0], 0);
-	atomic_long_set(&slowpath_pgalloc_count[1], 0);
-	atomic_long_set(&slowpath_pgalloc_count[2], 0);
-	atomic_long_set(&slowpath_pgalloc_count[3], 0);
-	atomic_long_set(&slowpath_pgalloc_count[4], 0);
-#endif
 	get_online_cpus();
 	for_each_online_cpu(cpu) {
 		struct mmonitor_event_state *s =
@@ -103,14 +95,6 @@ static int mmonitor_show(struct seq_file *s, void *data)
 #endif
 
 	seq_printf(s,
-#ifdef CONFIG_HISI_SLOW_PATH_COUNT
-		"pg_alloc: %ld\n"
-		"slowpath0: %ld\n"
-		"slowpath1: %ld\n"
-		"slowpath2: %ld\n"
-		"slowpath3: %ld\n"
-		"slowpath4: %ld\n"
-#endif
 #ifdef CONFIG_VM_EVENT_COUNTERS
 		"compact_stall: %ld\n"
 		"compact_suc: %ld\n"
@@ -118,14 +102,6 @@ static int mmonitor_show(struct seq_file *s, void *data)
 		"warn_alloc_failed: %ld\n"
 		"fcache : %ld\n"
 		"fcache miss: %ld\n",
-#ifdef CONFIG_HISI_SLOW_PATH_COUNT
-		pgalloc_count,
-		slowpath_pgalloc_count[0],
-		slowpath_pgalloc_count[1],
-		slowpath_pgalloc_count[2],
-		slowpath_pgalloc_count[3],
-		slowpath_pgalloc_count[4],
-#endif
 #ifdef CONFIG_VM_EVENT_COUNTERS
 		vm_buf[COMPACTSTALL],
 		vm_buf[COMPACTSUCCESS],
