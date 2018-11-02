@@ -38,10 +38,6 @@
 #include "internal.h"
 #include <linux/iolimit_cgroup.h>
 
-#ifdef CONFIG_TASK_PROTECT_LRU
-#include <linux/protect_lru.h>
-#endif
-
 #ifdef CONFIG_HW_MEMORY_MONITOR
 #include <chipset_common/mmonitor/mmonitor.h>
 #endif
@@ -644,9 +640,6 @@ int add_to_page_cache_lru(struct page *page, struct address_space *mapping,
 			workingset_activation(page);
 		} else
 			ClearPageActive(page);
-#ifdef CONFIG_TASK_PROTECT_LRU
-		protect_lru_set_from_file(page);
-#endif
 		lru_cache_add(page);
 	}
 	return ret;
@@ -1141,11 +1134,7 @@ no_page:
 		}
 	}
 
-#ifdef CONFIG_TASK_PROTECT_LRU
-	return protect_lru_move_and_shrink(page);
-#else
 	return page;
-#endif
 }
 EXPORT_SYMBOL(pagecache_get_page);
 

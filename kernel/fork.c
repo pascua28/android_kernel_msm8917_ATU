@@ -601,9 +601,6 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p)
 #if defined(CONFIG_TRANSPARENT_HUGEPAGE) && !USE_SPLIT_PMD_PTLOCKS
 	mm->pmd_huge_pte = NULL;
 #endif
-#ifdef CONFIG_TASK_PROTECT_LRU
-	mm->protect = 0;
-#endif
 
 	if (current->mm) {
 		mm->flags = current->mm->flags & MMF_INIT_MASK;
@@ -1435,10 +1432,6 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 	p->sequential_io	= 0;
 	p->sequential_io_avg	= 0;
 #endif
-#ifdef CONFIG_HUAWEI_SWAP_ZDATA
-	p->proc_reclaimed_result = NULL;
-#endif
-
 #ifdef CONFIG_HW_VIP_THREAD
 	init_task_vip_info(p);
 #endif
