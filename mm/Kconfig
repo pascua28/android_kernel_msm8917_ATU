@@ -709,15 +709,6 @@ config HUAWEI_SWAP_ZDATA
 
 	  If unsure, say Y to enable swap_zdata.
 
-config HUAWEI_DIRECT_SWAPPINESS
-	bool "Allow to adjust direct reclaim swappiness"
-	depends on SWAP && PROC_FS
-	default n
-	help
-	  Used to adjust direct reclaim cmpress priority by /proc/sys/vm/direct_swappiness.
-
-	  only 0 to 60 is valid. If unsure, say N to use it's original value(60).
-
 config DEBUG_VMALLOC
 	bool "Enable VMALLOC debugging support"
 	help

@@ -164,12 +164,6 @@ struct scan_control {
  * Kswapd swappiness, from 0 - 200.  Higher means more swappy.
  */
 int vm_swappiness = 60;
-#ifdef CONFIG_HUAWEI_DIRECT_SWAPPINESS
-/*
- * Direct reclaim swappiness, exptct 0 - 60. Higher means more swappy and slower.
- */
-int direct_vm_swappiness = 60;
-#endif
 
 /*
  * The total number of pages which are beyond the high watermark within all
@@ -2165,10 +2159,6 @@ static void get_scan_count(struct lruvec *lruvec, int swappiness,
 	if (current_is_kswapd()) {
 		if (!zone_reclaimable(zone))
 			force_scan = true;
-#ifdef CONFIG_HUAWEI_DIRECT_SWAPPINESS
-	} else {
-		swappiness = direct_vm_swappiness;
-#endif
 	}
 
 	if (!global_reclaim(sc))
