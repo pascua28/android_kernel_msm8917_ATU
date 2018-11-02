@@ -757,5 +757,3 @@ config HUAWEI_ENHANCED_RESERVE_SIZE_MBYTES
 config MM_DEBUG
 	bool "Enable MM DUMP support"
 	default n
-
-source "mm/hisi/Kconfig"
