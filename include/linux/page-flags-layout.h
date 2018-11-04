@@ -80,7 +80,6 @@
 #endif
 
 #define PROTECT_LRU_WIDTH  ({ BUILD_BUG(); 0; })
-#endif
 
 /*
  * We are going to use the flags for the page to node mapping if its in
