@@ -99,6 +99,9 @@ enum dsi_panel_bl_ctrl {
 	BL_PWM,
 	BL_WLED,
 	BL_DCS_CMD,
+	#ifdef CONFIG_LCDKIT_DRIVER
+	BL_IC_TI,
+	#endif
 	UNKNOWN_CTRL,
 };
 
@@ -431,6 +434,11 @@ struct mdss_dsi_ctrl_pdata {
 	int disp_te_gpio;
 	int rst_gpio;
 	int disp_en_gpio;
+
+	#ifdef CONFIG_LCDKIT_DRIVER
+	int disp_bl_gpio;
+	#endif
+
 	int bklt_en_gpio;
 	int mode_gpio;
 	int intf_mux_gpio;

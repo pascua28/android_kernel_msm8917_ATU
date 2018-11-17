@@ -26,10 +26,35 @@
 #define NETLINK_ECRYPTFS	19
 #define NETLINK_RDMA		20
 #define NETLINK_CRYPTO		21	/* Crypto layer */
+#ifdef CONFIG_CHR_NETLINK_MODULE
+#define NETLINK_CHR_EVENT_NL  23
+#endif
 #define NETLINK_SOCKEV		22	/* Socket Administrative Events */
+#ifdef CONFIG_HW_WIFIPRO
+#define NETLINK_WIFIPRO_EVENT_NL  24
+#endif
+
+#ifdef CONFIG_HW_DPIMARK_MODULE
+#define NETLINK_HW_DPI		25
+#endif
+
 #define NETLINK_INET_DIAG	NETLINK_SOCK_DIAG
 
-#define MAX_LINKS 32		
+#ifdef CONFIG_HUAWEI_KSTATE
+#define NETLINK_HW_KSTATE	30	/* kstate send event to user */
+#endif
+
+#ifdef CONFIG_HUAWEI_WIFI
+#define WLAN_NLINK_CESIUM   28
+#endif
+
+#if (defined(CONFIG_HW_CPULOAD_NOTI) || defined(CONFIG_HW_VIP_THREAD) \
+        || defined(CONFIG_HW_IAWARE_THREAD_BOOST))
+#define NETLINK_HW_IAWARE_CPU 33
+#define MAX_LINKS 37
+#else
+#define MAX_LINKS 37
+#endif
 
 struct sockaddr_nl {
 	__kernel_sa_family_t	nl_family;	/* AF_NETLINK	*/

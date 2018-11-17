@@ -27,6 +27,9 @@
 #include <net/sock.h>
 #include <net/net_namespace.h>
 
+#ifdef CONFIG_HUAWEI_DUBAI
+#include <linux/dubai.h>
+#endif
 
 u64 uevent_seqnum;
 #ifdef CONFIG_UEVENT_HELPER
@@ -324,6 +327,9 @@ int kobject_uevent_env(struct kobject *kobj, enum kobject_action action,
 		} else
 			retval = -ENOMEM;
 	}
+#ifdef CONFIG_HUAWEI_DUBAI
+	dubai_log_uevent(devpath, action);
+#endif
 #endif
 	mutex_unlock(&uevent_sock_mutex);
 

@@ -25,6 +25,10 @@
 #include "mdss_panel.h"
 #include "mdss_debug.h"
 #include "mdss_mdp_trace.h"
+#ifdef CONFIG_LCDKIT_DRIVER
+#include <linux/lcdkit_dsm.h>
+#include "lcdkit_dsi_status.h"
+#endif
 
 /* wait for at least 2 vsyncs for lowest refresh rate (24hz) */
 #define VSYNC_TIMEOUT_US 100000
@@ -824,6 +828,9 @@ static int mdss_mdp_video_ctx_stop(struct mdss_mdp_ctl *ctl,
 
 	mutex_lock(&ctl->offlock);
 	if (ctx->timegen_en) {
+#ifdef CONFIG_LCDKIT_DRIVER
+		mdss_dsi_status_check_ctl(ctl->mfd,false);
+#endif
 		rc = mdss_mdp_ctl_intf_event(ctl, MDSS_EVENT_BLANK, NULL,
 			CTL_INTF_EVENT_FLAG_DEFAULT);
 		if (rc == -EBUSY) {
@@ -1103,6 +1110,13 @@ static void mdss_mdp_video_underrun_intr_done(void *arg)
 	pr_debug("display underrun detected for ctl=%d count=%d\n", ctl->num,
 			ctl->underrun_cnt);
 
+#ifdef CONFIG_HUAWEI_DSM
+#ifdef CONFIG_LCDKIT_DRIVER
+	lcdkit_underrun_dsm_report(ctl->num,ctl->underrun_cnt, 0, 0, 0);
+#else
+	mdp_underrun_dsm_report(ctl->num,ctl->underrun_cnt);
+#endif
+#endif
 	if (!test_bit(MDSS_CAPS_3D_MUX_UNDERRUN_RECOVERY_SUPPORTED,
 		ctl->mdata->mdss_caps_map) &&
 		(ctl->opmode & MDSS_MDP_CTL_OP_PACK_3D_ENABLE))
@@ -1481,6 +1495,13 @@ static int mdss_mdp_video_display(struct mdss_mdp_ctl *ctl, void *arg)
 		reinit_completion(&ctx->vsync_comp);
 	} else {
 		WARN(1, "commit without wait! ctl=%d", ctl->num);
+#ifdef CONFIG_HUAWEI_DSM
+		#ifdef CONFIG_LCDKIT_DRIVER
+		lcdkit_report_dsm_err(DSM_LCD_MDSS_VIDEO_DISPLAY_ERROR_NO,0,ctl->num,0);
+		#else
+		lcd_report_dsm_err(DSM_LCD_MDSS_VIDEO_DISPLAY_ERROR_NO,ctl->num,0);
+		#endif
+#endif
 	}
 
 	MDSS_XLOG(ctl->num, ctl->underrun_cnt);
@@ -1539,6 +1560,10 @@ static int mdss_mdp_video_display(struct mdss_mdp_ctl *ctl, void *arg)
 		WARN(rc, "intf %d panel on error (%d)\n", ctl->intf_num, rc);
 		mdss_mdp_ctl_intf_event(ctl, MDSS_EVENT_POST_PANEL_ON, NULL,
 			CTL_INTF_EVENT_FLAG_DEFAULT);
+	/*scheduled the esd delay work*/
+#if defined(CONFIG_HUAWEI_KERNEL_LCD) || defined(CONFIG_LCDKIT_DRIVER)
+		mdss_dsi_status_check_ctl(ctl->mfd,true);
+#endif
 	}
 
 	if (mdss_mdp_is_lineptr_supported(ctl))

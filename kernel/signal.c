@@ -44,6 +44,18 @@
 #include <asm/siginfo.h>
 #include <asm/cacheflush.h>
 #include "audit.h"	/* audit_signal_info() */
+#ifdef CONFIG_HUAWEI_KSTATE
+#include <linux/hw_kcollect.h>
+#endif
+
+#ifdef CONFIG_HUAWEI_BOOST_KILL
+#include <asm/topology.h>
+#define FAST_CPU_MASK_NUM 0
+/* Add apportunity to config enable/disable boost
+ * killing action
+ */
+unsigned int sysctl_boost_killing;
+#endif
 
 /*
  * SLAB caches for signal bits.
@@ -933,6 +945,9 @@ static void complete_signal(int sig, struct task_struct *p, int group)
 	struct signal_struct *signal = p->signal;
 	struct task_struct *t;
 
+#ifdef CONFIG_HUAWEI_BOOST_KILL
+	struct cpumask *new_mask;
+#endif
 	/*
 	 * Now find a thread we can wake up to take the signal off the queue.
 	 *
@@ -988,6 +1003,15 @@ static void complete_signal(int sig, struct task_struct *p, int group)
 			signal->group_stop_count = 0;
 			t = p;
 			do {
+#ifdef CONFIG_HUAWEI_BOOST_KILL
+				if (sysctl_boost_killing) {
+					if (can_nice(t, -20))
+						set_user_nice(t, -20);
+					new_mask = cpu_coregroup_mask(FAST_CPU_MASK_NUM);
+					cpumask_copy(&t->cpus_allowed, new_mask);
+					t->nr_cpus_allowed = cpumask_weight(new_mask);
+				}
+#endif
 				task_clear_jobctl_pending(t, JOBCTL_PENDING_MASK);
 				sigaddset(&t->pending.signal, SIGKILL);
 				signal_wake_up(t, 1);
@@ -1197,7 +1221,22 @@ int do_send_sig_info(int sig, struct siginfo *info, struct task_struct *p,
 {
 	unsigned long flags;
 	int ret = -ESRCH;
-
+#ifdef CONFIG_HUAWEI_KSTATE
+	if (sig == SIGKILL || sig == SIGTERM || sig == SIGABRT) {
+		hwkillinfo(p->tgid, sig);
+	}
+#endif
+#ifdef CONFIG_HW_DIE_CATCH
+	/*if the process have KILL_CATCH_FLAG, need to catch it in android platform*/
+	if (p->signal->unexpected_die_catch_flags & KILL_CATCH_FLAG) {
+		pr_warn("ExitCatch: %s(%d) send_sig %d to %s(%d)\n",
+				current->comm, current->pid, sig, p->comm, p->pid);
+		/*if current is init, don't consider it*/
+		if (current->pid != 1) {
+			sig = (sig == SIGKILL || sig == SIGTERM) ? SIGABRT : sig;
+		}
+	}
+#endif
 	if (lock_task_sighand(p, &flags)) {
 		ret = send_signal(sig, info, p, group);
 		unlock_task_sighand(p, &flags);

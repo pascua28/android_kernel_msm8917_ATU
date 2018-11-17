@@ -37,6 +37,10 @@
 #include <linux/rmap.h>
 #include "internal.h"
 
+#ifdef CONFIG_HW_MEMORY_MONITOR
+#include <chipset_common/mmonitor/mmonitor.h>
+#endif
+
 #define CREATE_TRACE_POINTS
 #include <trace/events/filemap.h>
 
@@ -1490,7 +1494,13 @@ static ssize_t do_generic_file_read(struct file *filp, loff_t *ppos,
 		cond_resched();
 find_page:
 		page = find_get_page(mapping, index);
+#ifdef CONFIG_HW_MEMORY_MONITOR
+		count_mmonitor_event(FILE_CACHE_READ_COUNT);
+#endif
 		if (!page) {
+#ifdef CONFIG_HW_MEMORY_MONITOR
+			count_mmonitor_event(FILE_CACHE_MISS_COUNT);
+#endif
 			page_cache_sync_readahead(mapping,
 					ra, filp,
 					index, last_index - index);
@@ -1885,6 +1895,9 @@ int filemap_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 	 * Do we have something in the page cache already?
 	 */
 	page = find_get_page(mapping, offset);
+#ifdef CONFIG_HW_MEMORY_MONITOR
+	count_mmonitor_event(FILE_CACHE_MAP_COUNT);
+#endif
 	if (likely(page) && !(vmf->flags & FAULT_FLAG_TRIED)) {
 		/*
 		 * We found the page, so try async readahead before
@@ -2470,7 +2483,6 @@ ssize_t generic_perform_write(struct file *file,
 		unsigned long bytes;	/* Bytes to write to page */
 		size_t copied;		/* Bytes copied from user */
 		void *fsdata;
-
 		offset = (pos & (PAGE_CACHE_SIZE - 1));
 		bytes = min_t(unsigned long, PAGE_CACHE_SIZE - offset,
 						iov_iter_count(i));

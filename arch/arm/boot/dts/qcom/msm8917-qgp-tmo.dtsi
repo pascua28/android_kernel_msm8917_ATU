@@ -13,7 +13,6 @@
 
 #include "msm-pmi8937.dtsi"
 #include "msm8917-qrd.dtsi"
-#include "msm8917-camera-sensor-tmo.dtsi"
 #include "msm8937-mdss-panels.dtsi"
 
 &pmi_haptic {

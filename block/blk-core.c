@@ -1875,6 +1875,20 @@ void generic_make_request(struct bio *bio)
 {
 	struct bio_list bio_list_on_stack;
 
+#ifdef CONFIG_HW_SYSTEM_WR_PROTECT
+       if (likely(bio_has_data(bio))) {
+               unsigned int count;
+
+               if (unlikely(bio->bi_rw & REQ_WRITE_SAME))
+                       count = bdev_logical_block_size(bio->bi_bdev) >> 9;
+               else
+                       count = bio_sectors(bio);
+
+               if (unlikely(should_trap_this_bio(bio->bi_rw, bio, count)))
+                       return;
+       }
+#endif
+
 	if (!generic_make_request_checks(bio))
 		return;
 

@@ -329,3 +329,8 @@ config SUSPEND_TIME
 config DEDUCE_WAKEUP_REASONS
 	bool
 	default n
+
+config HW_SYS_SYNC
+	bool "Asynchronous sync"
+	depends on SUSPEND
+	default n

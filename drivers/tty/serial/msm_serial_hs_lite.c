@@ -52,6 +52,10 @@
 #include <linux/msm-bus.h>
 #include "msm_serial_hs_hwreg.h"
 
+#ifdef CONFIG_SERIAL_MSM_HSL_CONSOLE
+#include "serial_log_switch/serial_log_switch.h"
+#endif
+
 /*
  * There are 3 different kind of UART Core available on MSM.
  * High Speed UART (i.e. Legacy HSUART), GSBI based HSUART
@@ -1729,6 +1733,13 @@ static int msm_serial_hsl_probe(struct platform_device *pdev)
 
 	pr_info("detected port #%d (ttyHSL%d)\n", pdev->id, line);
 
+#ifdef CONFIG_SERIAL_MSM_HSL_CONSOLE
+	/* Port 0(uart 2) used for console. */
+	if (!is_serial_log_enabled() && 0 == pdev->id) {
+		pr_info("serial console disabled, do not register ttyHSL0.\n");
+		return -ENODEV;
+	}
+#endif
 	port = get_port_from_line(line);
 	port->dev = &pdev->dev;
 	port->uartclk = 7372800;

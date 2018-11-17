@@ -85,12 +85,20 @@
 #include <asm/paravirt.h>
 #endif
 
+#ifdef CONFIG_SRECORDER
+#include <linux/srecorder.h>
+#endif
+
 #include "qhmp_sched.h"
 #include "../workqueue_internal.h"
 #include "../smpboot.h"
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/sched.h>
+
+#ifdef CONFIG_HW_VIP_THREAD
+#include <chipset_common/hwcfs/hwcfs_common.h>
+#endif
 
 const char *task_event_names[] = {"PUT_PREV_TASK", "PICK_NEXT_TASK",
 				  "TASK_WAKE", "TASK_MIGRATE", "TASK_UPDATE",
@@ -312,7 +320,7 @@ __read_mostly int scheduler_running;
  * default: 0.95s
  */
 int sysctl_sched_rt_runtime = 950000;
-
+#ifndef CONFIG_HW_VIP_THREAD
 /*
  * __task_rq_lock - lock the rq @p resides on.
  */
@@ -372,7 +380,7 @@ task_rq_unlock(struct rq *rq, struct task_struct *p, unsigned long *flags)
 	raw_spin_unlock(&rq->lock);
 	raw_spin_unlock_irqrestore(&p->pi_lock, *flags);
 }
-
+#endif
 /*
  * this_rq_lock - lock this runqueue and disable interrupts.
  */
@@ -4216,6 +4224,9 @@ context_switch(struct rq *rq, struct task_struct *prev,
 
 	context_tracking_task_switch(prev, next);
 	/* Here we just switch the register state and the stack. */
+#ifdef CONFIG_MINIDUMP_TRACE_INFO
+	minidump_task_trace_write((void *)next);
+#endif
 	switch_to(prev, next, prev);
 
 	barrier();
@@ -4401,6 +4412,9 @@ void scheduler_tick(void)
 	rq_last_tick_reset(rq);
 	if (curr->sched_class == &fair_sched_class)
 		check_for_migration(rq, curr);
+#ifdef CONFIG_HW_VIP_THREAD
+	trigger_vip_balance(rq);
+#endif
 }
 
 #ifdef CONFIG_NO_HZ_FULL
@@ -4679,6 +4693,10 @@ need_resched:
 
 	if (task_on_rq_queued(prev) || rq->skip_clock_update < 0)
 		update_rq_clock(rq);
+   
+#ifdef CONFIG_HW_VIP_THREAD
+	prev->enqueue_time = rq->clock;
+#endif
 
 	next = pick_next_task(rq, prev);
 	wallclock = sched_ktime_clock();
@@ -9002,6 +9020,9 @@ void __init sched_init(void)
 		init_cfs_rq(&rq->cfs);
 		init_rt_rq(&rq->rt, rq);
 		init_dl_rq(&rq->dl, rq);
+#ifdef CONFIG_HW_VIP_THREAD
+		vip_init_rq_data(rq);
+#endif
 #ifdef CONFIG_FAIR_GROUP_SCHED
 		root_task_group.shares = ROOT_TASK_GROUP_LOAD;
 		INIT_LIST_HEAD(&rq->leaf_cfs_rq_list);

@@ -10,6 +10,8 @@
 
 #include <linux/random.h>
 #include <linux/string.h>
+#include <keys/user-type.h>
+#include <uapi/linux/keyctl.h>
 #include <linux/mount.h>
 #include "fscrypt_private.h"
 
@@ -33,8 +35,15 @@ static int create_encryption_context_from_policy(struct inode *inode,
 				const struct fscrypt_policy *policy)
 {
 	struct fscrypt_context ctx;
+	int res;
+	u8 nonce[FS_KEY_DERIVATION_NONCE_SIZE];
+	u8 plain_text[FS_KEY_DERIVATION_CIPHER_SIZE] = {0};
+	struct key *keyring_key = NULL;
+	struct fscrypt_key *master_key;
+	const struct user_key_payload *ukp;
+	struct crypto_aead *tfm = NULL;
 
-	ctx.format = FS_ENCRYPTION_CONTEXT_FORMAT_V1;
+	ctx.format = FS_ENCRYPTION_CONTEXT_FORMAT_V2;
 	memcpy(ctx.master_key_descriptor, policy->master_key_descriptor,
 					FS_KEY_DESCRIPTOR_SIZE);
 
@@ -48,10 +57,85 @@ static int create_encryption_context_from_policy(struct inode *inode,
 	ctx.contents_encryption_mode = policy->contents_encryption_mode;
 	ctx.filenames_encryption_mode = policy->filenames_encryption_mode;
 	ctx.flags = policy->flags;
-	BUILD_BUG_ON(sizeof(ctx.nonce) != FS_KEY_DERIVATION_NONCE_SIZE);
-	get_random_bytes(ctx.nonce, FS_KEY_DERIVATION_NONCE_SIZE);
 
-	return inode->i_sb->s_cop->set_context(inode, &ctx, sizeof(ctx), NULL);
+	BUILD_BUG_ON(sizeof(ctx.nonce) != FS_KEY_DERIVATION_CIPHER_SIZE);
+
+	/* get nonce and iv */
+	get_random_bytes(nonce, FS_KEY_DERIVATION_NONCE_SIZE);
+	get_random_bytes(ctx.iv, FS_KEY_DERIVATION_IV_SIZE);
+	memcpy(plain_text, nonce, FS_KEY_DERIVATION_NONCE_SIZE);
+
+	/* get DEK */
+	keyring_key = fscrypt_request_key(ctx.master_key_descriptor,
+				FS_KEY_DESC_PREFIX, FS_KEY_DESC_PREFIX_SIZE);
+	if (IS_ERR(keyring_key)) {
+		if (inode->i_sb->s_cop->key_prefix) {
+			u8 *prefix = inode->i_sb->s_cop->key_prefix;
+			int prefix_size;
+
+			prefix_size = strlen(prefix);
+			keyring_key = fscrypt_request_key(ctx.master_key_descriptor,
+						prefix, prefix_size);
+			if (!IS_ERR(keyring_key))
+				goto got_key;
+		}
+		return PTR_ERR(keyring_key);
+	}
+
+got_key:
+	if (keyring_key->type != &key_type_logon) {
+		printk_once(KERN_WARNING
+				"%s: key type must be logon\n", __func__);
+		res = -ENOKEY;
+		goto out;
+	}
+
+	down_read(&keyring_key->sem);
+
+	ukp = user_key_payload(keyring_key);
+	if (ukp->datalen != sizeof(struct fscrypt_key)) {
+		res = -EINVAL;
+		up_read(&keyring_key->sem);
+		goto out;
+	}
+
+	master_key = (struct fscrypt_key *)ukp->data;
+	//force the size equal to FS_AES_256_GCM_KEY_SIZE since user space might pass FS_AES_256_XTS_KEY_SIZE
+	master_key->size = FS_AES_256_GCM_KEY_SIZE;
+	if (master_key->size != FS_AES_256_GCM_KEY_SIZE) {
+		printk_once(KERN_WARNING
+				"%s: key size incorrect: %d\n",
+				__func__, master_key->size);
+		res = -ENOKEY;
+		up_read(&keyring_key->sem);
+		goto out;
+	}
+
+	tfm = (struct crypto_aead *)crypto_alloc_aead("gcm(aes)", 0, 0);
+	if (IS_ERR(tfm)) {
+		up_read(&keyring_key->sem);
+		res = PTR_ERR(tfm);
+		tfm = NULL;
+		pr_err("fscrypt %s : tfm allocation failed!\n", __func__);
+		goto out;
+	}
+
+	res = fscrypt_set_gcm_key(tfm, master_key->raw);
+	up_read(&keyring_key->sem);
+	if (res)
+		goto out;
+
+	res = fscrypt_derive_gcm_key(tfm, plain_text, ctx.nonce, ctx.iv, 1);
+	if (res)
+		goto out;
+
+	res = inode->i_sb->s_cop->set_context(inode, &ctx, sizeof(ctx), NULL);
+
+out:
+	if (tfm)
+		crypto_free_aead(tfm);
+	key_put(keyring_key);
+	return res;
 }
 
 int fscrypt_ioctl_set_policy(struct file *filp, const void __user *arg)
@@ -117,7 +201,7 @@ int fscrypt_ioctl_get_policy(struct file *filp, void __user *arg)
 		return res;
 	if (res != sizeof(ctx))
 		return -EINVAL;
-	if (ctx.format != FS_ENCRYPTION_CONTEXT_FORMAT_V1)
+	if (ctx.format != FS_ENCRYPTION_CONTEXT_FORMAT_V2)
 		return -EINVAL;
 
 	policy.version = 0;
@@ -240,6 +324,8 @@ int fscrypt_inherit_context(struct inode *parent, struct inode *child,
 	struct fscrypt_context ctx;
 	struct fscrypt_info *ci;
 	int res;
+	u8 nonce[FS_KEY_DERIVATION_NONCE_SIZE];
+	u8 plain_text[FS_KEY_DERIVATION_CIPHER_SIZE] = {0};
 
 	res = fscrypt_get_encryption_info(parent);
 	if (res < 0)
@@ -249,13 +335,22 @@ int fscrypt_inherit_context(struct inode *parent, struct inode *child,
 	if (ci == NULL)
 		return -ENOKEY;
 
-	ctx.format = FS_ENCRYPTION_CONTEXT_FORMAT_V1;
+	ctx.format = FS_ENCRYPTION_CONTEXT_FORMAT_V2;
 	ctx.contents_encryption_mode = ci->ci_data_mode;
 	ctx.filenames_encryption_mode = ci->ci_filename_mode;
 	ctx.flags = ci->ci_flags;
 	memcpy(ctx.master_key_descriptor, ci->ci_master_key,
 	       FS_KEY_DESCRIPTOR_SIZE);
-	get_random_bytes(ctx.nonce, FS_KEY_DERIVATION_NONCE_SIZE);
+
+	/* get nonce and iv */
+	get_random_bytes(nonce, FS_KEY_DERIVATION_NONCE_SIZE);
+	get_random_bytes(ctx.iv, FS_KEY_DERIVATION_IV_SIZE);
+	memcpy(plain_text, nonce, FS_KEY_DERIVATION_NONCE_SIZE);
+
+	res = fscrypt_derive_gcm_key(ci->ci_gtfm, plain_text, ctx.nonce, ctx.iv, 1);
+	if (res)
+		return res;
+
 	res = parent->i_sb->s_cop->set_context(child, &ctx,
 						sizeof(ctx), fs_data);
 	if (res)

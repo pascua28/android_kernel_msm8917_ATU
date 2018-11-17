@@ -142,8 +142,9 @@
 	};
 };
 
-&pmi_haptic {
-	qcom,actuator-type = "lra";
+
+&pmi_haptic{
+	qcom,actuator-type = "erm";
 	qcom,lra-auto-res-mode="qwd";
 	qcom,lra-high-z="opt1";
 	qcom,lra-res-cal-period = <0>;

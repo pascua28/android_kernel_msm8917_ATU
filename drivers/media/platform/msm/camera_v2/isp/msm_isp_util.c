@@ -22,6 +22,10 @@
 #include "cam_smmu_api.h"
 #define CREATE_TRACE_POINTS
 #include "trace/events/msm_cam.h"
+#ifdef CONFIG_HUAWEI_DSM
+#include "msm_camera_dsm.h"
+void camera_report_dsm_err_msm_isp(struct vfe_device *vfe_dev, int type, int err_num , const char* str);
+#endif
 
 #define MAX_ISP_V4l2_EVENTS 100
 #define MAX_ISP_REG_LIST 100
@@ -2046,6 +2050,18 @@ irqreturn_t msm_isp_process_irq(int irq_num, void *data)
 	msm_isp_process_overflow_irq(vfe_dev,
 		&irq_status0, &irq_status1, 0);
 
+	if ((vfe_dev->irq_status0 == irq_status0) &&
+			(vfe_dev->irq_status1 == irq_status1) &&
+			(vfe_dev->ping_pong_status == ping_pong_status)) {
+		pr_err("%s:VFE%d status0 0x%x status1 0x%x pingpong %d already handled\n",
+			__func__, vfe_dev->pdev->id, irq_status0, irq_status1, ping_pong_status);
+		return IRQ_HANDLED;
+	}
+
+	vfe_dev->irq_status0 = irq_status0;
+	vfe_dev->irq_status1 = irq_status1;
+	vfe_dev->ping_pong_status = ping_pong_status;
+
 	vfe_dev->hw_info->vfe_ops.core_ops.
 		get_error_mask(&error_mask0, &error_mask1);
 	error_mask0 &= irq_status0;
@@ -2264,6 +2280,10 @@ int msm_isp_open_node(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 	vfe_dev->isp_raw0_debug = 0;
 	vfe_dev->isp_raw1_debug = 0;
 	vfe_dev->isp_raw2_debug = 0;
+
+	vfe_dev->irq_status0 = 0;
+	vfe_dev->irq_status1 = 0;
+	vfe_dev->ping_pong_status = 0;
 
 	if (vfe_dev->hw_info->vfe_ops.core_ops.init_hw(vfe_dev) < 0) {
 		pr_err("%s: init hardware failed\n", __func__);
@@ -2505,3 +2525,63 @@ void msm_isp_dump_ping_pong_mismatch(void)
 	msm_isp_dump_taskelet_debug();
 	spin_unlock(&dump_tasklet_lock);
 }
+#ifdef CONFIG_HUAWEI_DSM
+static char camera_isp_dsm_log_buff[MSM_CAMERA_DSM_BUFFER_SIZE] = {0};
+void camera_report_dsm_err_msm_isp(struct vfe_device *vfe_dev, int type, int err_num , const char* str)
+{
+	ssize_t len = 0;
+	long max_clk = 0;
+	int rc = 0;
+
+	if(vfe_dev == NULL || str == NULL)
+	{
+		pr_err("%s: NULL pointer!!\n", __func__);
+		return;
+	}
+	memset(camera_isp_dsm_log_buff, 0, MSM_CAMERA_DSM_BUFFER_SIZE);
+
+	/* camera record error info according to err type */
+	switch(type)
+	{
+		case DSM_CAMERA_ISP_OVERFLOW:
+		{
+			/* isp overflow occurred*/
+			len += snprintf(camera_isp_dsm_log_buff+len, MSM_CAMERA_DSM_BUFFER_SIZE-len, "[msm_sensor]ISP Bus overflow detected.\n");
+			len += snprintf(camera_isp_dsm_log_buff+len, MSM_CAMERA_DSM_BUFFER_SIZE-len,
+					"isp_bandwidth[ISP_VFE] ab:%llu ib:%llu\nisp_bandwidth[ISP_CPP] ab:%llu ib:%llu\n",
+						isp_bandwidth_mgr.client_info[ISP_VFE0 + vfe_dev->pdev->id].ab,
+						isp_bandwidth_mgr.client_info[ISP_VFE0 + vfe_dev->pdev->id].ib,
+						isp_bandwidth_mgr.client_info[ISP_CPP].ab,
+						isp_bandwidth_mgr.client_info[ISP_CPP].ib);
+
+			vfe_dev->hw_info->vfe_ops.platform_ops.get_max_clk_rate(vfe_dev, &max_clk);//need be rechecked.
+			len += snprintf(camera_isp_dsm_log_buff+len, MSM_CAMERA_DSM_BUFFER_SIZE-len,
+					"pixel_clock:%ld, max clock:%ld\n", vfe_dev->axi_data.src_info[VFE_PIX_0].pixel_clock, max_clk);
+			break;
+		}
+
+		case DSM_CAMERA_ISP_AXI_STREAM_FAIL:
+			/* isp start/stop AXI stream failed */
+			len += snprintf(camera_isp_dsm_log_buff+len, MSM_CAMERA_DSM_BUFFER_SIZE-len, "[msm_sensor]%s. ISP AXI wait for config done failed.\n", str);
+			len += snprintf(camera_isp_dsm_log_buff+len, MSM_CAMERA_DSM_BUFFER_SIZE-len, "pix_stream_count:%d  num_active_stream:%d  active:%d\n",
+					vfe_dev->axi_data.src_info[VFE_PIX_0].pix_stream_count, vfe_dev->axi_data.num_active_stream, vfe_dev->axi_data.src_info[VFE_PIX_0].active);
+			break;
+
+		default:
+			break;
+	}
+
+	if ( len >= MSM_CAMERA_DSM_BUFFER_SIZE -1 )
+	{
+		ISP_DBG("write camera_isp_dsm_log_buff overflow.\n");
+		return;
+	}
+
+	rc = camera_report_dsm_err( type, err_num, camera_isp_dsm_log_buff);
+	if (rc < 0)
+	{
+		ISP_DBG("%s  camera_report_dsm_err fail.\n", __func__);
+	}
+	return ;
+}
+#endif

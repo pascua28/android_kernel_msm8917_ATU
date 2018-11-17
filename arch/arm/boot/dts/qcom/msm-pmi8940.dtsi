@@ -297,6 +297,12 @@
 			qcom,cycle-counter-en;
 			qcom,capacity-learning-on;
 
+			qcom,fg-control-slope-limiter;
+			qcom,fg-slope-limit-low-temp-chg=<6>;
+			qcom,fg-slope-limit-high-temp-chg=<6>;
+			qcom,fg-slope-limit-low-temp-dischg=<1>;
+			qcom,fg-slope-limit-high-temp-dischg=<1>;
+
 			qcom,fg-soc@4000 {
 			status = "okay";
 				reg = <0x4000 0x100>;
@@ -529,7 +535,7 @@
 				qcom,max-current = <1000>;
 				qcom,duration = <1280>;
 				qcom,id = <0>;
-				qcom,current = <625>;
+				qcom,current = <150>;
 			};
 
 			pmi8940_flash1: qcom,flash_1 {
@@ -576,6 +582,20 @@
 					regulator-name = "pon_spare_reg";
 				};
 			};
+
+			pmi8940_switch1: qcom,switch_1 {
+				label = "switch";
+				qcom,led-name = "led:switch_1";
+				qcom,default-led-trigger =
+						"switch1_trigger";
+				qcom,max-current = <1000>;
+				qcom,duration = <1280>;
+				qcom,id = <3>;
+				qcom,current = <625>;
+				reg0 {
+					regulator-name = "pon_spare_reg";
+				};
+			};
 		};
 
 		pmi_haptic: qcom,haptic@c000 {
@@ -588,9 +608,9 @@
 			vcc_pon-supply = <&pon_perph_reg>;
 			qcom,play-mode = "direct";
 			qcom,wave-play-rate-us = <5263>;
-			qcom,actuator-type = "lra";
+			qcom,actuator-type = "erm";
 			qcom,wave-shape = "square";
-			qcom,vmax-mv = <2000>;
+			qcom,vmax-mv = <3000>;
 			qcom,ilim-ma = <800>;
 			qcom,sc-deb-cycles = <8>;
 			qcom,int-pwm-freq-khz = <505>;

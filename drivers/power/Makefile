@@ -1,4 +1,5 @@
 ccflags-$(CONFIG_POWER_SUPPLY_DEBUG) := -DDEBUG
+ccflags-y += -Idrivers/hw_usb/hw_power
 
 power_supply-y				:= power_supply_core.o
 power_supply-$(CONFIG_SYSFS)		+= power_supply_sysfs.o
@@ -83,3 +84,10 @@ obj-$(CONFIG_MSM_BCL_CTL)	+= msm_bcl.o
 obj-$(CONFIG_MSM_BCL_PERIPHERAL_CTL) += bcl_peripheral.o
 obj-$(CONFIG_POWER_RESET)	+= reset/
 obj-$(CONFIG_ARCH_MSM)		+= qcom/
+obj-y				+= huawei/
+obj-y += cw2015_fuel_gauge.o
+obj-y	+= bq24157_charger.o
+obj-y += huawei_adc/
+obj-$(CONFIG_HUAWEI_USB_SHORT_CIRCUIT_PROTECT)  += usb_short_circuit_protect/
+obj-y += huawei_thermal/
+obj-y += hw_kstate/

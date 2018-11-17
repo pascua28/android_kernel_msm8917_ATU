@@ -34,6 +34,10 @@
 #include "sched.h"
 #include <trace/events/sched.h>
 
+#ifdef CONFIG_HW_VIP_THREAD
+#include <chipset_common/hwcfs/hwcfs_common.h>
+#endif
+
 /*
  * Targeted preemption latency for CPU-bound tasks:
  * (default: 6ms * (1 + ilog(ncpus)), units: nanoseconds)
@@ -6030,7 +6034,10 @@ enqueue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 
 		flags = ENQUEUE_WAKEUP;
 	}
-
+#ifdef CONFIG_HW_VIP_THREAD
+	enqueue_vip_thread(rq, p);
+#endif
+   
 	for_each_sched_entity(se) {
 		cfs_rq = cfs_rq_of(se);
 		cfs_rq->h_nr_running++;
@@ -6094,6 +6101,9 @@ static void dequeue_task_fair(struct rq *rq, struct task_struct *p, int flags)
 		}
 		flags |= DEQUEUE_SLEEP;
 	}
+#ifdef CONFIG_HW_VIP_THREAD
+	dequeue_vip_thread(rq, p);
+#endif
 
 	for_each_sched_entity(se) {
 		cfs_rq = cfs_rq_of(se);
@@ -6835,6 +6845,12 @@ static void check_preempt_wakeup(struct rq *rq, struct task_struct *p, int wake_
 	find_matching_se(&se, &pse);
 	update_curr(cfs_rq_of(se));
 	BUG_ON(!pse);
+#ifdef CONFIG_HW_VIP_THREAD
+	if (p->static_vip || atomic64_read(&p->dynamic_vip)) {
+		trace_sched_vip_sched(p, "vip_preempt");
+		goto preempt;
+	}
+#endif
 	if (wakeup_preempt_entity(se, pse) == 1) {
 		/*
 		 * Bias pick_next to pick the sched entity that is
@@ -6919,7 +6935,12 @@ again:
 	} while (cfs_rq);
 
 	p = task_of(se);
-
+#ifdef CONFIG_HW_VIP_THREAD
+        /*
+	 * pick vip or temp vip thread
+         */
+         pick_vip_thread(rq, &p, &se);
+#endif
 	/*
 	 * Since we haven't yet done put_prev_entity and if the selected task
 	 * is a different task than we started out with, try and touch the
@@ -6966,7 +6987,6 @@ simple:
 	} while (cfs_rq);
 
 	p = task_of(se);
-
 	if (hrtick_enabled(rq))
 		hrtick_start_fair(rq, p);
 

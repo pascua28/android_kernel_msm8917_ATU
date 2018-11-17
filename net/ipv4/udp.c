@@ -129,6 +129,9 @@ EXPORT_SYMBOL(sysctl_udp_wmem_min);
 
 atomic_long_t udp_memory_allocated;
 EXPORT_SYMBOL(udp_memory_allocated);
+#ifdef CONFIG_HW_NETWORK_AWARE
+extern void tcp_network_aware(bool isRecving);
+#endif
 
 #define MAX_UDP_PORTS 65536
 #define PORTS_PER_CHAIN (MAX_UDP_PORTS / UDP_HTABLE_SIZE_MIN)
@@ -896,7 +899,9 @@ int udp_sendmsg(struct kiocb *iocb, struct sock *sk, struct msghdr *msg,
 
 	if (msg->msg_flags & MSG_OOB) /* Mirror BSD error message compatibility */
 		return -EOPNOTSUPP;
-
+#ifdef CONFIG_HW_NETWORK_AWARE
+	tcp_network_aware(false);
+#endif
 	ipc.opt = NULL;
 	ipc.tx_flags = 0;
 	ipc.ttl = 0;
@@ -1273,6 +1278,9 @@ try_again:
 	if (!skb)
 		goto out;
 
+#ifdef CONFIG_HW_NETWORK_AWARE
+	tcp_network_aware(true);
+#endif
 	ulen = skb->len - sizeof(struct udphdr);
 	copied = len;
 	if (copied > ulen)

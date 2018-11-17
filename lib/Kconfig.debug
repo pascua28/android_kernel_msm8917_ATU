@@ -776,6 +776,13 @@ config BOOTPARAM_SOFTLOCKUP_PANIC_VALUE
 	default 0 if !BOOTPARAM_SOFTLOCKUP_PANIC
 	default 1 if BOOTPARAM_SOFTLOCKUP_PANIC
 
+# add HW_DIE_CATCH config
+config HW_DIE_CATCH
+	bool "unexpected die catch feature"
+	default y
+	help
+	  catch a process kill/exit and will transform it SIGABORT
+
 config DETECT_HUNG_TASK
 	bool "Detect Hung Tasks"
 	depends on DEBUG_KERNEL
@@ -790,6 +797,22 @@ config DETECT_HUNG_TASK
 	  task will stay in uninterruptible state. If lockdep is
 	  enabled then all held locks will also be reported. This
 	  feature has negligible overhead.
+
+config DETECT_HUAWEI_HUNG_TASK
+	bool "Detect Huawei Hung Tasks"
+	depends on DETECT_HUNG_TASK
+	default n
+	help
+	  Say Y here to enable huawei hung tasks detect.
+
+config HW_DETECT_HUNG_TASK
+	bool "Huawei Enhance DETECT_HUNG_TASK"
+	depends on DETECT_HUNG_TASK
+	default n
+	help
+	  Say Y here to enable the Huawei enhance hungtask,
+	  Enhanced by add function of Whitelist or Blacklist,
+	  that controls the processes be monitored by hungtask.
 
 config DEFAULT_HUNG_TASK_TIMEOUT
 	int "Default timeout for hung task detection (in seconds)"

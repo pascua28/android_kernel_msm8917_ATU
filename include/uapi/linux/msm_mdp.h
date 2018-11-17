@@ -222,6 +222,15 @@ enum {
 	FB_IMG,
 };
 
+typedef struct display_engine_panel_info_param {
+	int width;
+	int height;
+	int maxluminance;
+	int minluminance;
+	int maxbacklight;
+	int minbacklight;
+} display_engine_panel_info_param_t;
+
 enum {
 	HSIC_HUE = 0,
 	HSIC_SAT,

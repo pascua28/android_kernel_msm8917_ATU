@@ -51,12 +51,38 @@
 #include <asm/ptrace.h>
 #include <asm/irq_regs.h>
 
+#ifdef CONFIG_HANDSET_SYSRQ_RESET
+#include "sysrq_key/sysrq_key.h"
+#endif
+
 /* Whether we react on sysrq keys or just ignore them */
 static int __read_mostly sysrq_enabled = CONFIG_MAGIC_SYSRQ_DEFAULT_ENABLE;
 static bool __read_mostly sysrq_always_enabled;
 
 unsigned short platform_sysrq_reset_seq[] __weak = { KEY_RESERVED };
 int sysrq_reset_downtime_ms __weak;
+
+#ifdef CONFIG_HANDSET_SYSRQ_RESET
+static int __init sysrq_keytrigger_setup(char *p)
+{
+	unsigned int value = 0;
+
+	if (NULL == p) {
+		pr_err("%s: input null\n", __func__);
+		return -EINVAL;
+	}
+
+	/* from string to unsigned int */
+	if (kstrtouint(p, 0, &value) < 0) {
+		pr_err("%s: Failed to get sysrq keytrigger value\n", __func__);
+		return -EINVAL;
+	}
+
+	sysrq_enabled = value;
+	return 0;
+}
+early_param("androidboot.sysrq_key", sysrq_keytrigger_setup);
+#endif
 
 bool sysrq_on(void)
 {
@@ -76,9 +102,14 @@ static bool sysrq_on_mask(int mask)
 
 static int __init sysrq_always_enabled_setup(char *str)
 {
+#ifdef CONFIG_HANDSET_SYSRQ_RESET
+	/* make sure sysrq_always_enabled is zero, then enable state depends on by sysrq_enabled */
+	sysrq_always_enabled = false;
+	pr_info("sysrq_always_enabled is ignored, sysrq depends on sysrq_enabled\n");
+#else
 	sysrq_always_enabled = true;
 	pr_info("sysrq always enabled.\n");
-
+#endif
 	return 1;
 }
 
@@ -590,6 +621,7 @@ static const unsigned char sysrq_xlate[KEY_CNT] =
         "230\177\000\000\213\214\000\000\000\000\000\000\000\000\000\000" /* 0x50 - 0x5f */
         "\r\000/";                                      /* 0x60 - 0x6f */
 
+#ifndef CONFIG_HANDSET_SYSRQ_RESET
 struct sysrq_state {
 	struct input_handle handle;
 	struct work_struct reinject_work;
@@ -609,12 +641,13 @@ struct sysrq_state {
 	int reset_seq_version;
 	struct timer_list keyreset_timer;
 };
+#endif
 
 #define SYSRQ_KEY_RESET_MAX	20 /* Should be plenty */
 static unsigned short sysrq_reset_seq[SYSRQ_KEY_RESET_MAX];
 static unsigned int sysrq_reset_seq_len;
 static unsigned int sysrq_reset_seq_version = 1;
-
+#ifndef CONFIG_HANDSET_SYSRQ_RESET
 static void sysrq_parse_reset_sequence(struct sysrq_state *state)
 {
 	int i;
@@ -640,7 +673,7 @@ static void sysrq_parse_reset_sequence(struct sysrq_state *state)
 
 	state->reset_seq_version = sysrq_reset_seq_version;
 }
-
+#endif
 static void sysrq_do_reset(unsigned long _state)
 {
 	struct sysrq_state *state = (struct sysrq_state *) _state;
@@ -650,7 +683,7 @@ static void sysrq_do_reset(unsigned long _state)
 	sys_sync();
 	kernel_restart(NULL);
 }
-
+#ifndef CONFIG_HANDSET_SYSRQ_RESET
 static void sysrq_handle_reset_request(struct sysrq_state *state)
 {
 	if (state->reset_requested)
@@ -695,7 +728,7 @@ static void sysrq_detect_reset_sequence(struct sysrq_state *state,
 		}
 	}
 }
-
+#endif
 #ifdef CONFIG_OF
 static void sysrq_of_get_keyreset_config(void)
 {
@@ -756,6 +789,7 @@ static void sysrq_reinject_alt_sysrq(struct work_struct *work)
 	}
 }
 
+#ifndef CONFIG_HANDSET_SYSRQ_RESET
 static bool sysrq_handle_keypress(struct sysrq_state *sysrq,
 				  unsigned int code, int value)
 {
@@ -847,6 +881,7 @@ static bool sysrq_handle_keypress(struct sysrq_state *sysrq,
 
 	return suppress;
 }
+#endif
 
 static bool sysrq_filter(struct input_handle *handle,
 			 unsigned int type, unsigned int code, int value)
@@ -885,7 +920,9 @@ static int sysrq_connect(struct input_handler *handler,
 {
 	struct sysrq_state *sysrq;
 	int error;
-
+#ifdef CONFIG_HANDSET_SYSRQ_RESET
+	sysrq_key_init();
+#endif
 	sysrq = kzalloc(sizeof(struct sysrq_state), GFP_KERNEL);
 	if (!sysrq)
 		return -ENOMEM;
@@ -939,10 +976,16 @@ static void sysrq_disconnect(struct input_handle *handle)
  */
 static const struct input_device_id sysrq_ids[] = {
 	{
+#ifdef CONFIG_HANDSET_SYSRQ_RESET
+		/* remove the keybit of KEY_LEFTALT for sysrq function */
+		.flags = INPUT_DEVICE_ID_MATCH_EVBIT,
+		.evbit = { BIT_MASK(EV_KEY) },
+#else
 		.flags = INPUT_DEVICE_ID_MATCH_EVBIT |
 				INPUT_DEVICE_ID_MATCH_KEYBIT,
 		.evbit = { BIT_MASK(EV_KEY) },
 		.keybit = { BIT_MASK(KEY_LEFTALT) },
+#endif
 	},
 	{ },
 };

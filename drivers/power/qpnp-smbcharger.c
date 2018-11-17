@@ -39,6 +39,8 @@
 #include <linux/msm_bcl.h>
 #include <linux/ktime.h>
 #include <linux/pmic-voter.h>
+#include <linux/power/huawei_charger.h>
+#include <linux/power/huawei_dsm_charger.h>
 
 /* Mask/Bit helpers */
 #define _SMB_MASK(BITS, POS) \
@@ -118,6 +120,8 @@ struct smbchg_chip {
 	int				typec_current_ma;
 	int				dc_max_current_ma;
 	int				dc_target_current_ma;
+	int				usb_target_current_ma;
+	int				current_adjusted_ma;
 	int				cfg_fastchg_current_ma;
 	int				fastchg_current_ma;
 	int				vfloat_mv;
@@ -148,7 +152,9 @@ struct smbchg_chip {
 	bool				skip_usb_suspend_for_fake_battery;
 	bool				hvdcp_not_supported;
 	bool				otg_pinctrl;
+	bool				device_not_support_hvdcp;
 	bool				cfg_override_usb_current;
+	bool				not_set_usb_online;
 	u8				original_usbin_allowance;
 	struct parallel_usb_cfg		parallel;
 	struct delayed_work		parallel_en_work;
@@ -237,6 +243,7 @@ struct smbchg_chip {
 	int				usbid_change_irq;
 	int				chg_error_irq;
 	bool				enable_aicl_wake;
+	bool			ignore_usb_ibus_setting;
 
 	/* psy */
 	struct power_supply		*usb_psy;
@@ -285,6 +292,10 @@ struct smbchg_chip {
 	struct votable			*hw_aicl_rerun_enable_indirect_votable;
 	struct votable			*aicl_deglitch_short_votable;
 	struct votable			*hvdcp_enable_votable;
+#ifdef CONFIG_HUAWEI_USB
+	bool				    release_wakelock_flag;
+#endif
+	bool					skip_rerun_type_flag;
 };
 
 enum qpnp_schg {
@@ -334,8 +345,10 @@ enum wake_reason {
 	PM_ESR_PULSE = BIT(2),
 	PM_PARALLEL_TAPER = BIT(3),
 	PM_DETECT_HVDCP = BIT(4),
+	PM_CHARGING_CHECK = BIT(7),
 };
 
+static struct smbchg_chip *global_chip = NULL;
 /* fcc_voters */
 #define ESR_PULSE_FCC_VOTER	"ESR_PULSE_FCC_VOTER"
 #define BATT_TYPE_FCC_VOTER	"BATT_TYPE_FCC_VOTER"
@@ -417,7 +430,23 @@ enum wake_reason {
 #define	HVDCP_OTG_VOTER			"HVDCP_OTG_VOTER"
 #define	HVDCP_PULSING_VOTER		"HVDCP_PULSING_VOTER"
 
-static int smbchg_debug_mask;
+static bool factory_mode = false;
+static int __init early_parse_factory_mode(char *cmdline)
+{
+    if (!cmdline) {
+        pr_err("%s: invalid param, fatal error\n", __func__);
+        return 0;
+    }
+
+	if ((cmdline) && !strncmp(cmdline, "factory", strlen("factory"))) {
+		factory_mode = true;
+	}
+
+	return 0;
+}
+early_param("androidboot.huawei_swtype", early_parse_factory_mode);
+
+static int smbchg_debug_mask = PR_INTERRUPT | PR_STATUS | PR_MISC | PR_TYPEC;
 module_param_named(
 	debug_mask, smbchg_debug_mask, int, S_IRUSR | S_IWUSR
 );
@@ -476,6 +505,8 @@ module_param_named(
 	int, S_IRUSR | S_IWUSR
 );
 
+static int get_prop_batt_capacity(struct smbchg_chip *chip);
+
 #define pr_smb(reason, fmt, ...)				\
 	do {							\
 		if (smbchg_debug_mask & (reason))		\
@@ -491,6 +522,9 @@ module_param_named(
 		else							\
 			pr_debug_ratelimited(fmt, ##__VA_ARGS__);	\
 	} while (0)
+#ifdef CONFIG_HUAWEI_USB
+#include "hw_rt_deep_sleep_qpnp_smbcharger.c"
+#endif
 
 static int smbchg_read(struct smbchg_chip *chip, u8 *val,
 			u16 addr, int count)
@@ -920,11 +954,13 @@ static void read_usb_type(struct smbchg_chip *chip, char **usb_type_name,
 #define BATT_TAPER_CHG_VAL		0x3
 #define CHG_INHIBIT_BIT			BIT(1)
 #define BAT_TCC_REACHED_BIT		BIT(7)
+#define BAT_FULL_CAPACITY		100
 static int get_prop_batt_status(struct smbchg_chip *chip)
 {
 	int rc, status = POWER_SUPPLY_STATUS_DISCHARGING;
 	u8 reg = 0, chg_type;
 	bool charger_present, chg_inhibit;
+	int capacity = 0;
 
 	charger_present = is_usb_present(chip) | is_dc_present(chip) |
 			  chip->hvdcp_3_det_ignore_uv;
@@ -937,8 +973,17 @@ static int get_prop_batt_status(struct smbchg_chip *chip)
 		return POWER_SUPPLY_STATUS_UNKNOWN;
 	}
 
-	if (reg & BAT_TCC_REACHED_BIT)
+	if (chip->batt_hot || chip->batt_cold) {
+		return POWER_SUPPLY_STATUS_NOT_CHARGING;
+	}
+
+	capacity = get_prop_batt_capacity(chip);
+	if (BAT_FULL_CAPACITY == capacity) {
 		return POWER_SUPPLY_STATUS_FULL;
+	}
+
+	if ((reg & BAT_TCC_REACHED_BIT) && (BAT_FULL_CAPACITY != capacity))
+		return POWER_SUPPLY_STATUS_CHARGING;
 
 	chg_inhibit = reg & CHG_INHIBIT_BIT;
 	if (chg_inhibit)
@@ -3950,6 +3995,10 @@ static int smbchg_otg_regulator_enable(struct regulator_dev *rdev)
 	if (rc) {
 		dev_err(chip->dev, "Couldn't switch to soft start completion, rc=%d\n",
 			rc);
+#ifdef CONFIG_HUAWEI_PMU_DSM
+		dsm_post_chg_bms_info(DSM_ENABLE_OTG_FAIL,
+				"Couldn't switch to soft start completion, rc = %d\n", rc);
+#endif
 		return rc;
 	}
 	smbchg_icl_loop_disable_check(chip);
@@ -3963,9 +4012,13 @@ static int smbchg_otg_regulator_enable(struct regulator_dev *rdev)
 	msleep(20);
 	rc = smbchg_masked_write(chip, chip->bat_if_base + CMD_CHG_REG,
 			OTG_EN_BIT, OTG_EN_BIT);
-	if (rc < 0)
+	if (rc < 0) {
 		dev_err(chip->dev, "Couldn't enable OTG mode rc=%d\n", rc);
-	else
+#ifdef CONFIG_HUAWEI_PMU_DSM
+		dsm_post_chg_bms_info(DSM_ENABLE_OTG_FAIL,
+				"Couldn't enable OTG mode rc = %d\n", rc);
+#endif
+	} else
 		chip->otg_enable_time = ktime_get();
 	pr_smb(PR_STATUS, "Enabling OTG Boost\n");
 	return rc;
@@ -4032,6 +4085,10 @@ static int smbchg_external_otg_regulator_enable(struct regulator_dev *rdev)
 	rc = vote(chip->usb_suspend_votable, OTG_EN_VOTER, true, 0);
 	if (rc < 0) {
 		dev_err(chip->dev, "Couldn't suspend charger rc=%d\n", rc);
+#ifdef CONFIG_HUAWEI_PMU_DSM
+		dsm_post_chg_bms_info(DSM_ENABLE_OTG_FAIL,
+				"Couldn't suspend charger rc = %d\n", rc);
+#endif
 		return rc;
 	}
 
@@ -4039,6 +4096,10 @@ static int smbchg_external_otg_regulator_enable(struct regulator_dev *rdev)
 			chip->usb_chgpth_base + USBIN_CHGR_CFG, 1);
 	if (rc < 0) {
 		dev_err(chip->dev, "Couldn't read usb allowance rc=%d\n", rc);
+#ifdef CONFIG_HUAWEI_PMU_DSM
+		dsm_post_chg_bms_info(DSM_ENABLE_OTG_FAIL,
+				"Couldn't read usb allowance rc = %d\n", rc);
+#endif
 		return rc;
 	}
 
@@ -4050,6 +4111,10 @@ static int smbchg_external_otg_regulator_enable(struct regulator_dev *rdev)
 	rc = vote(chip->hvdcp_enable_votable, HVDCP_OTG_VOTER, true, 0);
 	if (rc < 0) {
 		dev_err(chip->dev, "Couldn't disable HVDCP rc=%d\n", rc);
+#ifdef CONFIG_HUAWEI_PMU_DSM
+		dsm_post_chg_bms_info(DSM_ENABLE_OTG_FAIL,
+				"Couldn't disable HVDCP rc = %d\n", rc);
+#endif
 		return rc;
 	}
 
@@ -4058,6 +4123,10 @@ static int smbchg_external_otg_regulator_enable(struct regulator_dev *rdev)
 				0xFF, USBIN_ADAPTER_9V);
 	if (rc < 0) {
 		dev_err(chip->dev, "Couldn't write usb allowance rc=%d\n", rc);
+#ifdef CONFIG_HUAWEI_PMU_DSM
+		dsm_post_chg_bms_info(DSM_ENABLE_OTG_FAIL,
+				"Couldn't write usb allowance rc = %d\n", rc);
+#endif
 		return rc;
 	}
 
@@ -4350,7 +4419,7 @@ static int smbchg_register_chg_led(struct smbchg_chip *chip)
 {
 	int rc;
 
-	chip->led_cdev.name = "red";
+	chip->led_cdev.name = "red_smbcharger";
 	chip->led_cdev.brightness_set = smbchg_chg_led_brightness_set;
 	chip->led_cdev.brightness_get = smbchg_chg_led_brightness_get;
 
@@ -4654,7 +4723,11 @@ static int smbchg_set_optimal_charging_mode(struct smbchg_chip *chip, int type)
 	return 0;
 }
 
-#define DEFAULT_SDP_MA		100
+/*
+ * Set USB default current as 0 to not enable charging, as enable
+ * charging will have side effect to the float charger detection.
+ */
+#define DEFAULT_SDP_MA		500
 #define DEFAULT_CDP_MA		1500
 static int smbchg_change_usb_supply_type(struct smbchg_chip *chip,
 						enum power_supply_type type)
@@ -4931,7 +5004,8 @@ static void handle_usb_removal(struct smbchg_chip *chip)
 		power_supply_set_present(chip->usb_psy, chip->usb_present);
 	}
 	set_usb_psy_dp_dm(chip, POWER_SUPPLY_DP_DM_DPR_DMR);
-	schedule_work(&chip->usb_set_online_work);
+	if (!chip->not_set_usb_online)
+		schedule_work(&chip->usb_set_online_work);
 	pr_smb(PR_MISC, "setting usb psy health UNKNOWN\n");
 	rc = power_supply_set_health_state(chip->usb_psy,
 			POWER_SUPPLY_HEALTH_UNKNOWN);
@@ -4959,7 +5033,7 @@ static void handle_usb_removal(struct smbchg_chip *chip)
 	vote(chip->usb_icl_votable, SW_AICL_ICL_VOTER, false, 0);
 	vote(chip->aicl_deglitch_short_votable,
 		HVDCP_SHORT_DEGLITCH_VOTER, false, 0);
-	if (!chip->hvdcp_not_supported)
+	if (!chip->hvdcp_not_supported && !chip->device_not_support_hvdcp)
 		restore_from_hvdcp_detection(chip);
 }
 
@@ -4976,6 +5050,7 @@ static bool is_usbin_uv_high(struct smbchg_chip *chip)
 	return reg &= USBIN_UV_BIT;
 }
 
+static int rerun_apsd(struct smbchg_chip *chip);
 #define HVDCP_NOTIFY_MS		2500
 static void handle_usb_insertion(struct smbchg_chip *chip)
 {
@@ -5018,10 +5093,11 @@ static void handle_usb_insertion(struct smbchg_chip *chip)
 				"usb psy does not allow updating prop %d rc = %d\n",
 				POWER_SUPPLY_HEALTH_GOOD, rc);
 	}
-	schedule_work(&chip->usb_set_online_work);
+	if (!chip->not_set_usb_online)
+		schedule_work(&chip->usb_set_online_work);
 
-	if (!chip->hvdcp_not_supported &&
-			(usb_supply_type == POWER_SUPPLY_TYPE_USB_DCP)) {
+	if (!chip->hvdcp_not_supported && !chip->device_not_support_hvdcp
+			&& (usb_supply_type == POWER_SUPPLY_TYPE_USB_DCP)) {
 		cancel_delayed_work_sync(&chip->hvdcp_det_work);
 		smbchg_stay_awake(chip, PM_DETECT_HVDCP);
 		schedule_delayed_work(&chip->hvdcp_det_work,
@@ -5215,10 +5291,15 @@ static void increment_aicl_count(struct smbchg_chip *chip)
 			 */
 			chip->very_weak_charger = true;
 			bad_charger = true;
+			pr_info("bad charger is detected\n");
 		}
 		if (bad_charger) {
 			pr_smb(PR_MISC,
 				"setting usb psy health UNSPEC_FAILURE\n");
+#ifdef CONFIG_HUAWEI_PMU_DSM
+			dsm_post_chg_bms_info(DSM_CHG_BAD_CHARGER,
+				"very weak charger\n");
+#endif
 			rc = power_supply_set_health_state(chip->usb_psy,
 					POWER_SUPPLY_HEALTH_UNSPEC_FAILURE);
 			if (rc)
@@ -5662,6 +5743,10 @@ static int rerun_apsd(struct smbchg_chip *chip)
 
 out:
 	chip->hvdcp_3_det_ignore_uv = false;
+	if (rc && !is_src_detect_high(chip)) {
+		pr_smb(PR_MISC, "DCP force removed\n");
+		update_usb_status(chip, 0, true);
+	}
 	return rc;
 }
 
@@ -6015,9 +6100,16 @@ static int smbchg_get_iusb(struct smbchg_chip *chip)
 {
 	int rc, iusb_ua = -EINVAL;
 	struct qpnp_vadc_result adc_result;
+	u8 reg;
 
 	if (!is_usb_present(chip) && !is_dc_present(chip))
 		return 0;
+
+	/* if usb suspend, return 0, or iusb would be a large random value */
+	smbchg_read(chip, &reg, chip->usb_chgpth_base + ICL_STS_2_REG, 1);
+	if (reg & USBIN_SUSPEND_STS_BIT) {
+		return 0;
+	}
 
 	if (chip->vchg_vadc_dev && chip->vchg_adc_channel != -EINVAL) {
 		rc = qpnp_vadc_read(chip->vchg_vadc_dev,
@@ -6035,6 +6127,7 @@ static int smbchg_get_iusb(struct smbchg_chip *chip)
 	return iusb_ua;
 }
 
+#define IINLIM_2000 2000
 static void smbchg_external_power_changed(struct power_supply *psy)
 {
 	struct smbchg_chip *chip = container_of(psy,
@@ -6075,6 +6168,9 @@ static void smbchg_external_power_changed(struct power_supply *psy)
 	if (rc == 0)
 		current_limit = prop.intval / 1000;
 
+	if(chip->skip_rerun_type_flag)
+		goto  skip_for_correct_detect;
+
 	rc = chip->usb_psy->get_property(chip->usb_psy,
 				POWER_SUPPLY_PROP_REAL_TYPE, &prop);
 
@@ -6101,7 +6197,8 @@ static void smbchg_external_power_changed(struct power_supply *psy)
 		}
 
 		read_usb_type(chip, &usb_type_name, &usb_supply_type);
-		if (usb_supply_type == POWER_SUPPLY_TYPE_USB_DCP) {
+		if (usb_supply_type == POWER_SUPPLY_TYPE_USB_DCP &&
+                    !chip->device_not_support_hvdcp) {
 			schedule_delayed_work(&chip->hvdcp_det_work,
 				msecs_to_jiffies(HVDCP_NOTIFY_MS));
 			if (chip->parallel.use_parallel_aicl) {
@@ -6112,21 +6209,46 @@ static void smbchg_external_power_changed(struct power_supply *psy)
 		}
 
 		read_usb_type(chip, &usb_type_name, &usb_supply_type);
-		if (usb_supply_type == POWER_SUPPLY_TYPE_USB_DCP)
+		if (usb_supply_type == POWER_SUPPLY_TYPE_USB_DCP &&
+                    !chip->device_not_support_hvdcp)
 			schedule_delayed_work(&chip->hvdcp_det_work,
 				msecs_to_jiffies(HVDCP_NOTIFY_MS));
 	}
 
-	if (usb_supply_type != POWER_SUPPLY_TYPE_USB)
-		goto  skip_current_for_non_sdp;
+skip_for_correct_detect:
+    if (chip->ignore_usb_ibus_setting) {
+        rc = chip->usb_psy->get_property(chip->usb_psy,
+                    POWER_SUPPLY_PROP_TYPE, &prop);
+        if (rc == 0 && current_limit < DEFAULT_SDP_MA &&
+                    prop.intval != POWER_SUPPLY_TYPE_USB_DCP && false == chip->release_wakelock_flag )
+            current_limit = DEFAULT_SDP_MA;
+    }
 
-	pr_smb(PR_MISC, "usb type = %s current_limit = %d\n",
-			usb_type_name, current_limit);
+    if (current_limit != chip->usb_target_current_ma) {
+        chip->usb_target_current_ma = current_limit;
+        pr_smb(PR_STATUS, "changed current_limit = %d\n",
+                    current_limit);
+        if (current_limit < IINLIM_2000) {
+            read_usb_type(chip, &usb_type_name, &usb_supply_type);
+            if (usb_supply_type != POWER_SUPPLY_TYPE_USB)
+                goto  skip_current_for_non_sdp;
 
-	rc = vote(chip->usb_icl_votable, PSY_ICL_VOTER, true,
-				current_limit);
-	if (rc < 0)
-		pr_err("Couldn't update USB PSY ICL vote rc=%d\n", rc);
+            pr_smb(PR_MISC, "usb type = %s current_limit = %d\n",
+                    usb_type_name, current_limit);
+
+            rc = vote(chip->usb_icl_votable, PSY_ICL_VOTER, true,
+                        current_limit);
+            if (rc < 0)
+                pr_err("Couldn't update USB PSY ICL vote rc=%d\n", rc);
+        } else {
+            if (current_limit > IINLIM_2000)
+                current_limit = IINLIM_2000;
+            rc = vote(chip->usb_icl_votable, PSY_ICL_VOTER, true,
+                    current_limit);
+            if (rc < 0)
+                pr_err("Couldn't update USB PSY ICL vote rc=%d\n", rc);
+        }
+    }
 
 skip_current_for_non_sdp:
 	smbchg_vfloat_adjust_check(chip);
@@ -6167,6 +6289,8 @@ static enum power_supply_property smbchg_battery_properties[] = {
 	POWER_SUPPLY_PROP_RESTRICTED_CHARGING,
 	POWER_SUPPLY_PROP_ALLOW_HVDCP3,
 	POWER_SUPPLY_PROP_MAX_PULSE_ALLOWED,
+	POWER_SUPPLY_PROP_ALLOW_HVDCP,
+	POWER_SUPPLY_PROP_HIZ_MODE,
 };
 
 static int smbchg_battery_set_property(struct power_supply *psy,
@@ -6178,6 +6302,7 @@ static int smbchg_battery_set_property(struct power_supply *psy,
 				struct smbchg_chip, batt_psy);
 
 	switch (prop) {
+	case POWER_SUPPLY_PROP_FACTORY_DIAG:
 	case POWER_SUPPLY_PROP_BATTERY_CHARGING_ENABLED:
 		vote(chip->battchg_suspend_votable, BATTCHG_USER_EN_VOTER,
 				!val->intval, 0);
@@ -6188,7 +6313,8 @@ static int smbchg_battery_set_property(struct power_supply *psy,
 		rc = vote(chip->dc_suspend_votable, USER_EN_VOTER,
 				!val->intval, 0);
 		chip->chg_enabled = val->intval;
-		schedule_work(&chip->usb_set_online_work);
+        if (!chip->not_set_usb_online)
+		    schedule_work(&chip->usb_set_online_work);
 		break;
 	case POWER_SUPPLY_PROP_CAPACITY:
 		chip->fake_battery_soc = val->intval;
@@ -6244,11 +6370,30 @@ static int smbchg_battery_set_property(struct power_supply *psy,
 		if (chip->typec_psy)
 			update_typec_otg_status(chip, val->intval, false);
 		break;
+	#ifdef CONFIG_HUAWEI_USB
+	case POWER_SUPPLY_PROP_RELEASE_WAKELOCK:
+		smbchg_release_wakelock(chip, val->intval);
+		break;
+	#endif
 	case POWER_SUPPLY_PROP_ALLOW_HVDCP3:
 		if (chip->allow_hvdcp3_detection != val->intval) {
 			chip->allow_hvdcp3_detection = !!val->intval;
 			power_supply_changed(&chip->batt_psy);
 		}
+		break;
+	case POWER_SUPPLY_PROP_HIZ_MODE:
+		rc = vote(chip->usb_suspend_votable, USER_EN_VOTER,
+				!!val->intval, 0);
+		rc = vote(chip->dc_suspend_votable, USER_EN_VOTER,
+				!!val->intval, 0);
+		chip->chg_enabled = !val->intval;
+		break;
+	case POWER_SUPPLY_PROP_INPUT_CURRENT_MAX:
+		pr_info("update user ICL to %d\n",val->intval);
+		rc = vote(chip->usb_icl_votable, USER_ICL_VOTER, true,
+					val->intval);
+		if (rc < 0)
+			pr_err("Couldn't update USB USER ICL vote rc=%d\n", rc);
 		break;
 	default:
 		return -EINVAL;
@@ -6274,6 +6419,8 @@ static int smbchg_battery_is_writeable(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_RERUN_AICL:
 	case POWER_SUPPLY_PROP_RESTRICTED_CHARGING:
 	case POWER_SUPPLY_PROP_ALLOW_HVDCP3:
+	case POWER_SUPPLY_PROP_HIZ_MODE:
+	case POWER_SUPPLY_PROP_INPUT_CURRENT_MAX:
 		rc = 1;
 		break;
 	default:
@@ -6283,6 +6430,8 @@ static int smbchg_battery_is_writeable(struct power_supply *psy,
 	return rc;
 }
 
+#define UA_TO_MA    1000
+#define UV_TO_MV    1000
 static int smbchg_battery_get_property(struct power_supply *psy,
 				       enum power_supply_property prop,
 				       union power_supply_propval *val)
@@ -6297,6 +6446,7 @@ static int smbchg_battery_get_property(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_PRESENT:
 		val->intval = get_prop_batt_present(chip);
 		break;
+	case POWER_SUPPLY_PROP_FACTORY_DIAG:
 	case POWER_SUPPLY_PROP_BATTERY_CHARGING_ENABLED:
 		val->intval
 			= get_effective_result(chip->battchg_suspend_votable);
@@ -6385,13 +6535,23 @@ static int smbchg_battery_get_property(struct power_supply *psy,
 		val->intval = 0;
 		break;
 	case POWER_SUPPLY_PROP_INPUT_CURRENT_NOW:
-		val->intval = smbchg_get_iusb(chip);
+		val->intval = smbchg_get_iusb(chip) / UA_TO_MA;
 		break;
 	case POWER_SUPPLY_PROP_ALLOW_HVDCP3:
 		val->intval = chip->allow_hvdcp3_detection;
 		break;
 	case POWER_SUPPLY_PROP_MAX_PULSE_ALLOWED:
 		val->intval = chip->max_pulse_allowed;
+		break;
+	case POWER_SUPPLY_PROP_ALLOW_HVDCP:
+		val->intval = !chip->device_not_support_hvdcp;
+		break;
+	case POWER_SUPPLY_PROP_HIZ_MODE:
+		val->intval = !chip->chg_enabled;
+		break;
+	case POWER_SUPPLY_PROP_CHARGER_PRESENT:
+		val->intval = !!(is_usb_present(chip) | is_dc_present(chip) |
+						chip->hvdcp_3_det_ignore_uv);
 		break;
 	default:
 		return -EINVAL;
@@ -6501,6 +6661,7 @@ static irqreturn_t batt_hot_handler(int irq, void *_chip)
 	smbchg_read(chip, &reg, chip->bat_if_base + RT_STS, 1);
 	chip->batt_hot = !!(reg & HOT_BAT_HARD_BIT);
 	pr_smb(PR_INTERRUPT, "triggered: 0x%02x\n", reg);
+    battery_health_handler();
 	smbchg_parallel_usb_check_ok(chip);
 	if (chip->psy_registered)
 		power_supply_changed(&chip->batt_psy);
@@ -6519,6 +6680,7 @@ static irqreturn_t batt_cold_handler(int irq, void *_chip)
 	smbchg_read(chip, &reg, chip->bat_if_base + RT_STS, 1);
 	chip->batt_cold = !!(reg & COLD_BAT_HARD_BIT);
 	pr_smb(PR_INTERRUPT, "triggered: 0x%02x\n", reg);
+    battery_health_handler();
 	smbchg_parallel_usb_check_ok(chip);
 	if (chip->psy_registered)
 		power_supply_changed(&chip->batt_psy);
@@ -6533,10 +6695,30 @@ static irqreturn_t batt_warm_handler(int irq, void *_chip)
 {
 	struct smbchg_chip *chip = _chip;
 	u8 reg = 0;
+	int rc = 0;
 
 	smbchg_read(chip, &reg, chip->bat_if_base + RT_STS, 1);
 	chip->batt_warm = !!(reg & HOT_BAT_SOFT_BIT);
 	pr_smb(PR_INTERRUPT, "triggered: 0x%02x\n", reg);
+    battery_health_handler();
+	if (!chip->batt_warm) {
+		rc = smbchg_read(chip, &reg, chip->chgr_base + RT_STS, 1);
+		if (rc < 0) {
+			dev_err(chip->dev, "Unable to read RT_STS rc = %d\n", rc);
+		}
+		pr_smb(PR_INTERRUPT, "warm is clear, resume charging\n");
+		rc = smbchg_charging_en(chip, false);
+		if (rc < 0) {
+			dev_err(chip->dev,
+				"Couldn't enable charging: rc = %d\n", rc);
+		}
+		rc = smbchg_charging_en(chip, true);
+		if (rc < 0) {
+			dev_err(chip->dev,
+				"Couldn't enable charging: rc = %d\n", rc);
+		}
+	}
+
 	smbchg_parallel_usb_check_ok(chip);
 	if (chip->psy_registered)
 		power_supply_changed(&chip->batt_psy);
@@ -6553,6 +6735,7 @@ static irqreturn_t batt_cool_handler(int irq, void *_chip)
 	smbchg_read(chip, &reg, chip->bat_if_base + RT_STS, 1);
 	chip->batt_cool = !!(reg & COLD_BAT_SOFT_BIT);
 	pr_smb(PR_INTERRUPT, "triggered: 0x%02x\n", reg);
+    battery_health_handler();
 	smbchg_parallel_usb_check_ok(chip);
 	if (chip->psy_registered)
 		power_supply_changed(&chip->batt_psy);
@@ -6597,10 +6780,16 @@ static irqreturn_t chg_error_handler(int irq, void *_chip)
 		dev_err(chip->dev, "Unable to read RT_STS rc = %d\n", rc);
 	} else {
 		pr_smb(PR_INTERRUPT, "triggered: 0x%02x\n", reg);
-		if (reg & CHG_COMP_SFT_BIT)
+		if (reg & CHG_COMP_SFT_BIT) {
 			set_property_on_fg(chip,
 					POWER_SUPPLY_PROP_SAFETY_TIMER_EXPIRED,
 					1);
+#ifdef CONFIG_HUAWEI_PMU_DSM
+			dsm_post_chg_bms_info(DSM_CHG_TIMEOUT,
+						"Charging timeout\n");
+#endif
+		}
+
 	}
 
 	smbchg_parallel_usb_check_ok(chip);
@@ -6654,6 +6843,8 @@ static irqreturn_t chg_term_handler(int irq, void *_chip)
 	if (chip->psy_registered)
 		power_supply_changed(&chip->batt_psy);
 	smbchg_charging_status_change(chip);
+	/* Clear the awake flag to allow sleep when charging done */
+	smbchg_relax(chip, PM_CHARGING_CHECK);
 
 	return IRQ_HANDLED;
 }
@@ -6679,6 +6870,9 @@ static irqreturn_t recharge_handler(int irq, void *_chip)
 	struct smbchg_chip *chip = _chip;
 	u8 reg = 0;
 
+	/* Stay awake when recharge start */
+	if (!chip->release_wakelock_flag && is_usb_present(chip))
+		smbchg_stay_awake(chip, PM_CHARGING_CHECK);
 	smbchg_read(chip, &reg, chip->chgr_base + RT_STS, 1);
 	pr_smb(PR_INTERRUPT, "triggered: 0x%02x\n", reg);
 	smbchg_parallel_usb_check_ok(chip);
@@ -6698,6 +6892,9 @@ static irqreturn_t wdog_timeout_handler(int irq, void *_chip)
 	if (chip->psy_registered)
 		power_supply_changed(&chip->batt_psy);
 	smbchg_charging_status_change(chip);
+#ifdef CONFIG_HUAWEI_PMU_DSM
+	dsm_post_chg_bms_info(DSM_WATCHDOG_FAULT, "wdog timeout rt_sts = 0x%02x\n", reg);
+#endif
 	return IRQ_HANDLED;
 }
 
@@ -6773,6 +6970,10 @@ static irqreturn_t usbin_ov_handler(int irq, void *_chip)
 					"usb psy does not allow updating prop %d rc = %d\n",
 					POWER_SUPPLY_HEALTH_OVERVOLTAGE, rc);
 		}
+#ifdef CONFIG_HUAWEI_PMU_DSM
+		dsm_post_chg_bms_info(DSM_CHG_OVP_ERROR_NO,
+				"USB over voltage: %duV\n", smbchg_get_iusb(chip));
+#endif
 	} else {
 		chip->usb_ov_det = false;
 		/* If USB is present, then handle the USB insertion */
@@ -6842,24 +7043,33 @@ static irqreturn_t usbin_uv_handler(int irq, void *_chip)
 		if ((reg & ICL_MODE_MASK) != ICL_MODE_HIGH_CURRENT) {
 			/*
 			 * If AICL is not even enabled, this is either an
-			 * SDP or a grossly out of spec charger. Do not
-			 * draw any current from it.
+			 * SDP or a grossly out of spec charger. Set 150mA
+			 * to protect the SDP charger.
 			 */
-			rc = vote(chip->usb_suspend_votable,
-					WEAK_CHARGER_EN_VOTER, true, 0);
-			if (rc < 0)
-				pr_err("could not disable charger: %d", rc);
+			pr_info("very weak SDP detected reg: %02x\n", reg);
+			/* Charge with 150mA with a weak SDP */
+			rc = vote(chip->usb_icl_votable, PSY_ICL_VOTER, true,
+				CURRENT_150_MA);
+			if (rc < 0) {
+				pr_err("Couldn't vote for new USB ICL rc=%d\n", rc);
+			}
+
+#ifdef CONFIG_HUAWEI_PMU_DSM
+			dsm_post_chg_bms_info(DSM_CHG_BAD_CHARGER,
+				"weak SDP charger, limit current to 150mA\n");
+#endif
 		} else if (aicl_level == chip->tables.usb_ilim_ma_table[0]) {
-			/*
-			 * we are in a situation where the adapter is not able
-			 * to supply even 300mA. Disable hw aicl reruns else it
-			 * is only a matter of time when we get back here again
-			 */
-			rc = vote(chip->hw_aicl_rerun_disable_votable,
-				WEAK_CHARGER_HW_AICL_VOTER, true, 0);
-			if (rc < 0)
-				pr_err("Couldn't disable hw aicl rerun rc=%d\n",
-						rc);
+			pr_info("aicl_level: %d\n", aicl_level);
+			/* Charge with 150mA with a weak charger */
+			rc = vote(chip->usb_icl_votable, PSY_ICL_VOTER, true,
+				CURRENT_150_MA);
+			if (rc < 0) {
+				pr_err("Couldn't vote for new USB ICL rc=%d\n", rc);
+			}
+#ifdef CONFIG_HUAWEI_PMU_DSM
+			dsm_post_chg_bms_info(DSM_CHG_BAD_CHARGER,
+				"weak DCP charger, aicl level %d\n", aicl_level);
+#endif
 		}
 		pr_smb(PR_MISC, "setting usb psy health UNSPEC_FAILURE\n");
 		rc = power_supply_set_health_state(chip->usb_psy,
@@ -6927,8 +7137,14 @@ static irqreturn_t src_detect_handler(int irq, void *_chip)
 		pr_err("could not enable charger: %d\n", rc);
 
 	if (src_detect) {
+		/* Stay awake during usb is inserted */
+		smbchg_stay_awake(chip, PM_CHARGING_CHECK);
+		pr_smb(PR_STATUS, "wake-up sources when inserting charger: 0x%02x \n",chip->wake_reasons);
 		update_usb_status(chip, usb_present, 0);
 	} else {
+		/* Clear the awake flag when usb is removed */
+		smbchg_relax(chip, PM_CHARGING_CHECK);
+		pr_smb(PR_STATUS, "wake-up sources when pulling out charger: 0x%02x \n",chip->wake_reasons);
 		update_usb_status(chip, 0, false);
 		chip->aicl_irq_count = 0;
 	}
@@ -6951,6 +7167,9 @@ static irqreturn_t otg_oc_handler(int irq, void *_chip)
 
 	if (chip->schg_version == QPNP_SCHG_LITE) {
 		pr_warn("OTG OC triggered - OTG disabled\n");
+#ifdef CONFIG_HUAWEI_PMU_DSM
+		dsm_post_chg_bms_info(DSM_OTG_FAULT, "OTG OC triggered -- OTG disbled\n");
+#endif
 		return IRQ_HANDLED;
 	}
 
@@ -6974,6 +7193,11 @@ static irqreturn_t otg_oc_handler(int irq, void *_chip)
 		if (rc)
 			pr_err("Failed to reset OTG OC state rc=%d\n", rc);
 		chip->otg_enable_time = ktime_get();
+	} else {
+		pr_warn("OTG OC triggered -- OTG disabled\n");
+#ifdef CONFIG_HUAWEI_PMU_DSM
+		dsm_post_chg_bms_info(DSM_OTG_FAULT, "OTG OC triggered\n");
+#endif
 	}
 	return IRQ_HANDLED;
 }
@@ -6982,9 +7206,32 @@ static irqreturn_t otg_oc_handler(int irq, void *_chip)
  * otg_fail_handler() - called when the usb otg fails
  * (when vbat < OTG UVLO threshold)
  */
+#define OTG_STS	0x10
 static irqreturn_t otg_fail_handler(int irq, void *_chip)
 {
+	struct smbchg_chip *chip = _chip;
+	int rc = 0;
+	u8 reg = 0;
 	pr_smb(PR_INTERRUPT, "triggered\n");
+
+    if (NULL == chip) {
+        pr_err("%s: Invalid param, fatal error\n", __func__);
+        return IRQ_HANDLED;
+    }
+
+	rc = smbchg_read(chip, &reg, chip->otg_base + OTG_STS, 1);
+	if (rc) {
+		dev_err(chip->dev, "read otg status reg fail rc = %d\n", rc);
+#ifdef CONFIG_HUAWEI_PMU_DSM
+		dsm_post_chg_bms_info(DSM_ENABLE_OTG_FAIL,
+				"read otg status reg fail rc = %d\n", rc);
+#endif
+		goto OUT;
+	}
+#ifdef CONFIG_HUAWEI_PMU_DSM
+	dsm_post_chg_bms_info(DSM_ENABLE_OTG_FAIL, "OTG status reg = 0x%x\n", reg);
+#endif
+OUT:
 	return IRQ_HANDLED;
 }
 
@@ -7158,6 +7405,8 @@ static inline int get_bpd(const char *name)
 #define INPUT_MISSING_POLLER_EN_BIT	BIT(3)
 #define CHGR_CCMP_CFG			0xFA
 #define JEITA_TEMP_HARD_LIMIT_BIT	BIT(5)
+#define JEITA_SL_COMP_MASK		SMB_MASK(3, 0)
+#define JEITA_SL_COMP_CFG	    0
 #define HVDCP_ADAPTER_SEL_MASK		SMB_MASK(5, 4)
 #define HVDCP_ADAPTER_SEL_9V_BIT	BIT(4)
 #define HVDCP_AUTH_ALG_EN_BIT		BIT(6)
@@ -7457,6 +7706,29 @@ static int smbchg_hw_init(struct smbchg_chip *chip)
 				rc);
 			return rc;
 		}
+	}
+
+#ifdef CONFIG_HLTHERM_RUNTEST
+        /* if define the macro CONFIG_HLTHERM_RUNTEST, Disenable the temp hard limit */
+        rc = smbchg_sec_masked_write(chip,
+                chip->chgr_base + CHGR_CCMP_CFG, JEITA_TEMP_HARD_LIMIT_BIT,
+                JEITA_TEMP_HARD_LIMIT_BIT);
+        if (rc < 0) {
+                dev_err(chip->dev,"Couldn't set jeita temp hard limit rc = %d\n",rc);
+                return rc;
+        }
+
+        /* disable safety timer */
+        smbchg_safety_timer_enable(chip, 0);
+#endif
+	/* just enable float voltage compensation with batt warm */
+	rc = smbchg_sec_masked_write(chip, chip->chgr_base + CHGR_CCMP_CFG,
+					JEITA_SL_COMP_MASK, JEITA_SL_COMP_CFG);
+	if (rc < 0) {
+		dev_err(chip->dev,
+				"Couldn't set jeita temp soft limit rc = %d\n",
+				rc);
+		return rc;
 	}
 
 	/* make the buck switch faster to prevent some vbus oscillation */
@@ -7876,6 +8148,10 @@ static int smb_parse_dt(struct smbchg_chip *chip)
 					"qcom,force-aicl-rerun");
 	chip->skip_usb_suspend_for_fake_battery = of_property_read_bool(node,
 				"qcom,skip-usb-suspend-for-fake-battery");
+	chip->skip_rerun_type_flag = of_property_read_bool(node,
+				"qcom,skip-rerun-usb-type-flag");
+	chip->ignore_usb_ibus_setting = of_property_read_bool(node,
+				"qcom,ignore-usb-ibus-setting");
 
 	/* parse the battery missing detection pin source */
 	rc = of_property_read_string(chip->spmi->dev.of_node,
@@ -8376,6 +8652,30 @@ static int smbchg_check_chg_version(struct smbchg_chip *chip)
 	return 0;
 }
 
+static void rerun_cdp_det_if_necessary(struct smbchg_chip *chip)
+{
+	int rc = 0;
+	char *usb_type_name = NULL;
+	enum power_supply_type usb_supply_type;
+
+	read_usb_type(chip, &usb_type_name, &usb_supply_type);
+	if (POWER_SUPPLY_TYPE_USB_CDP == usb_supply_type) {
+		pr_smb(PR_MISC,
+				"CDP detected -- rerun apsd!\n");
+		chip->hvdcp_3_det_ignore_uv = true;
+		pr_smb(PR_MISC, "setting usb psy dp=f dm=f 1\n");
+		power_supply_set_dp_dm(chip->usb_psy, POWER_SUPPLY_DP_DM_DPF_DMF);
+		rc = rerun_apsd(chip);
+		if (rc) {
+			pr_err("APSD re-run failed\n");
+		}
+		chip->hvdcp_3_det_ignore_uv = false;
+		if (!is_src_detect_high(chip)) {
+			pr_smb(PR_MISC, "Charger removed\n");
+		}
+	}
+}
+
 static void rerun_hvdcp_det_if_necessary(struct smbchg_chip *chip)
 {
 	enum power_supply_type usb_supply_type;
@@ -8639,7 +8939,7 @@ static int smbchg_probe(struct spmi_device *spmi)
 
 	chip->previous_soc = -EINVAL;
 	chip->batt_psy.name		= chip->battery_psy_name;
-	chip->batt_psy.type		= POWER_SUPPLY_TYPE_BATTERY;
+	chip->batt_psy.type		= POWER_SUPPLY_TYPE_UNKNOWN;
 	chip->batt_psy.get_property	= smbchg_battery_get_property;
 	chip->batt_psy.set_property	= smbchg_battery_set_property;
 	chip->batt_psy.properties	= smbchg_battery_properties;
@@ -8707,7 +9007,9 @@ static int smbchg_probe(struct spmi_device *spmi)
 
 	rerun_hvdcp_det_if_necessary(chip);
 
-	update_usb_status(chip, is_usb_present(chip), false);
+	rerun_cdp_det_if_necessary(chip);
+
+	update_usb_status(chip, is_usb_present(chip), true);
 	dump_regs(chip);
 	create_debugfs_entries(chip);
 	dev_info(chip->dev,

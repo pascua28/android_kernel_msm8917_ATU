@@ -25,6 +25,7 @@
 #include <sound/asound.h>
 #include "msm-dts-srs-tm-config.h"
 #include <sound/adsp_err.h>
+#include <sound/tas2560_smartamp.h>
 
 #define TIMEOUT_MS 1000
 
@@ -117,6 +118,35 @@ static struct adm_multi_ch_map multi_ch_maps[2] = {
 static int adm_get_parameters[MAX_COPPS_PER_PORT * ADM_GET_PARAMETER_LENGTH];
 static int adm_module_topo_list[
 	MAX_COPPS_PER_PORT * ADM_GET_TOPO_MODULE_LIST_LENGTH];
+
+#ifdef CONFIG_SND_SOC_TAS2560
+int afe_smartamp_algo_ctrl(u8 *user_data, uint32_t param_id,
+			uint8_t get_set, int32_t length, int module_id)
+{
+	int32_t  ret = 0;
+	switch (get_set) {
+	case TAS_SET_PARAM:
+			pr_err("TAS2560-ALGO:%s TAS_SET_PARAM", __func__);
+			ret = afe_smartamp_set_calib_data(param_id ,
+					(struct afe_smartamp_set_params_t *)user_data, length, module_id);
+		break;
+	case TAS_GET_PARAM: {
+			struct afe_smartamp_get_calib calib_resp;
+			pr_err("TAS2560-ALGO:%s TAS_GET_PARAM", __func__);
+			memset (&calib_resp, 0, sizeof(calib_resp));
+			ret = afe_smartamp_get_calib_data(&calib_resp,
+							param_id, module_id);
+			memcpy(user_data, calib_resp.res_cfg.payload, length);
+		}
+		break;
+	default:
+		pr_err("TAS2560-ALGO:%s INVALID", __func__);
+		goto fail_cmd;
+	}
+fail_cmd:
+	return ret;
+}
+#endif
 
 int adm_validate_and_get_port_index(int port_id)
 {

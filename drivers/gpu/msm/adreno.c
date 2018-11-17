@@ -42,6 +42,10 @@
 /* Include the master list of GPU cores that are supported */
 #include "adreno-gpulist.h"
 
+#ifdef CONFIG_HUAWEI_DSM
+#include <dsm/dsm_pub.h>
+struct dsm_client* gpu_dclient = NULL;
+#endif
 #undef MODULE_PARAM_PREFIX
 #define MODULE_PARAM_PREFIX "adreno."
 
@@ -388,6 +392,12 @@ static void adreno_input_work(struct work_struct *work)
 	mutex_unlock(&device->mutex);
 }
 
+#if defined(CONFIG_HUAWEI_KERNEL_LCD) || defined(CONFIG_LCDKIT_DRIVER)
+void adreno_force_waking_gpu()
+{
+	schedule_work(&device_3d0.input_work);
+}
+#endif
 /*
  * Process input events and schedule work if needed.  At this point we are only
  * interested in groking EV_ABS touchscreen events
@@ -561,6 +571,12 @@ void adreno_hang_int_callback(struct adreno_device *adreno_dev, int bit)
 {
 	KGSL_DRV_CRIT_RATELIMIT(KGSL_DEVICE(adreno_dev),
 			"MISC: GPU hang detected\n");
+#ifdef CONFIG_HUAWEI_DSM
+    if (!dsm_client_ocuppy(gpu_dclient)) {
+        dsm_client_record(gpu_dclient, "MISC: GPU hang detected\n");
+        dsm_client_notify(gpu_dclient, DSM_LCD_GPU_HANG_ERROR_NO);
+    }
+#endif
 	adreno_irqctrl(adreno_dev, 0);
 
 	/* Trigger a fault in the dispatcher - this will effect a restart */
@@ -959,6 +975,13 @@ static int adreno_probe(struct platform_device *pdev)
 	struct adreno_device *adreno_dev;
 	int status;
 
+#ifdef CONFIG_HUAWEI_DSM
+    struct dsm_dev dsm_gpu = {
+        .name = "dsm_gpu",
+        .fops = NULL,
+        .buff_size = 1024,
+    };
+#endif
 	adreno_dev = adreno_get_dev(pdev);
 
 	if (adreno_dev == NULL) {
@@ -1041,6 +1064,11 @@ out:
 		kgsl_device_platform_remove(device);
 		device->pdev = NULL;
 	}
+#ifdef CONFIG_HUAWEI_DSM
+    if (!gpu_dclient) {
+        gpu_dclient = dsm_register_client(&dsm_gpu);
+    }
+#endif
 
 	return status;
 }

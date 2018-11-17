@@ -62,6 +62,7 @@ obj-$(CONFIG_CW1200)	+= cw1200/
 obj-$(CONFIG_RSI_91X)	+= rsi/
 
 obj-$(CONFIG_WCNSS_CORE)	+= wcnss/
+obj-$(CONFIG_HUAWEI_WIFI)	+= drv_net_decoupled/
 
 obj-$(CONFIG_CNSS)	+= cnss/
 obj-$(CONFIG_CNSS2)	+= cnss2/

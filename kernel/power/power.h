@@ -287,6 +287,9 @@ static inline suspend_state_t pm_autosleep_state(void) { return PM_SUSPEND_ON; }
 
 #endif /* !CONFIG_PM_AUTOSLEEP */
 
+#ifdef CONFIG_HW_SYS_SYNC
+#include "sys_sync.h"
+#endif
 #ifdef CONFIG_PM_WAKELOCKS
 
 /* kernel/power/wakelock.c */

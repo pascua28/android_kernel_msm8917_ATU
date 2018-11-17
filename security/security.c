@@ -27,6 +27,7 @@
 #include <linux/backing-dev.h>
 #include <linux/pfk.h>
 #include <net/flow.h>
+#include <chipset_common/bfmr/bfm/chipsets/bfm_chipsets.h>
 
 #define MAX_LSM_EVM_XATTR	2
 
@@ -51,6 +52,10 @@ static inline int __init verify(struct security_operations *ops)
 static void __init do_security_initcalls(void)
 {
 	initcall_t *call;
+
+	bfm_set_boot_stage(KERNEL_SECURITY_INITCALL);
+	printk(KERN_INFO "Boot_monitor set stage:KERNEL_SECURITY_INITCALL\n");
+
 	call = __security_initcall_start;
 	while (call < __security_initcall_end) {
 		(*call) ();

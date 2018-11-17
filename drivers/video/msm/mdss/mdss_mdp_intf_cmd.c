@@ -21,6 +21,10 @@
 #include "mdss_debug.h"
 #include "mdss_mdp_trace.h"
 #include "mdss_dsi_clk.h"
+#ifdef CONFIG_LCDKIT_DRIVER
+#include <linux/lcdkit_dsm.h>
+#include "lcdkit_dsi_status.h"
+#endif
 #include <linux/interrupt.h>
 
 #define MAX_RECOVERY_TRIALS 10
@@ -1974,6 +1978,14 @@ static int mdss_mdp_cmd_wait4pingpong(struct mdss_mdp_ctl *ctl, void *arg)
 				"dsi1_ctrl", "dsi1_phy", "vbif", "vbif_nrt",
 				"dbg_bus", "vbif_dbg_bus", "panic");
 			mdss_fb_report_panel_dead(ctl->mfd);
+#ifdef CONFIG_HUAWEI_DSM
+			/* report pingpong dsm error */
+			#ifdef CONFIG_LCDKIT_DRIVER
+			lcdkit_report_dsm_err(DSM_LCD_MDSS_PINGPONG_ERROR_NO,0,rc,0);
+			#else
+			lcd_report_dsm_err(DSM_LCD_MDSS_PINGPONG_ERROR_NO,rc,0);
+			#endif
+#endif
 		}
 
 		/* disable te irq */
@@ -2132,6 +2144,10 @@ static int mdss_mdp_cmd_panel_on(struct mdss_mdp_ctl *ctl,
 		WARN(rc, "intf %d tearcheck enable error (%d)\n",
 				ctl->intf_num, rc);
 
+	/*schedule the esd delay work*/
+#if defined(CONFIG_HUAWEI_KERNEL_LCD) || defined(CONFIG_LCDKIT_DRIVER)
+			mdss_dsi_status_check_ctl(ctl->mfd,true);
+#endif
 		ctx->panel_power_state = MDSS_PANEL_POWER_ON;
 		if (sctx)
 			sctx->panel_power_state = MDSS_PANEL_POWER_ON;
@@ -2937,6 +2953,10 @@ static int mdss_mdp_cmd_intfs_stop(struct mdss_mdp_ctl *ctl, int session,
 		return -ENODEV;
 	}
 
+	/*cancel the esd delay work*/
+#ifdef CONFIG_LCDKIT_DRIVER
+	mdss_dsi_status_check_ctl(ctl->mfd,false);
+#endif
 	mdss_mdp_cmd_ctx_stop(ctl, ctx, panel_power_state);
 
 	if (is_pingpong_split(ctl->mfd)) {

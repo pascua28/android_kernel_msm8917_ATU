@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
+ * Copyright (c) 2017, The Linux Foundation. All rights reserved.
+=======
  * Copyright (c) 2018, The Linux Foundation. All rights reserved.
+>>>>>>> bf015f23ec... ARM: dts: msm: Add DT support for SDA450 with PMI8950
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -22,7 +26,11 @@
 / {
 	model = "Qualcomm Technologies, Inc. SDA450 + PMI8950 CDP";
 	compatible = "qcom,sda450-cdp", "qcom,sda450", "qcom,cdp";
+<<<<<<< HEAD
 	qcom,board-id= <1 0>;
+=======
+	qcom,board-id = <1 0>;
+>>>>>>> bf015f23ec... ARM: dts: msm: Add DT support for SDA450 with PMI8950
 };
 
 &pmi8950_charger {

@@ -1173,6 +1173,28 @@ int msm_camera_init_gpio_pin_tbl(struct device_node *of_node,
 		rc = 0;
 	}
 
+	rc = of_property_read_u32(of_node, "qcom,gpio-cam-id", &val);
+	if (rc != -EINVAL) {
+		if (rc < 0) {
+			pr_err("%s:%d read qcom,gpio-cam-id failed rc %d\n",
+				__func__, __LINE__, rc);
+			goto ERROR;
+		} else if (val >= gpio_array_size) {
+			pr_err("%s:%d qcom,gpio-cam-id invalid %d\n",
+				__func__, __LINE__, val);
+			rc = -EINVAL;
+			goto ERROR;
+		}
+		gconf->gpio_num_info->gpio_num[SENSOR_GPIO_CAM_ID] =
+			gpio_array[val];
+		gconf->gpio_num_info->valid[SENSOR_GPIO_CAM_ID] = 1;
+		CDBG("%s qcom,gpio-cam-id %d\n", __func__,
+			gconf->gpio_num_info->gpio_num[SENSOR_GPIO_CAM_ID]);
+	} else {
+		rc = 0;
+	}
+
+
 	return rc;
 
 ERROR:

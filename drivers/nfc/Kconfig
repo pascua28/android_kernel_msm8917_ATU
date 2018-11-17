@@ -3,7 +3,7 @@
 #
 
 menu "Near Field Communication (NFC) devices"
-	depends on NFC
+#	depends on NFC
 
 config NFC_PN533
 	tristate "NXP PN533 USB driver"
@@ -67,6 +67,12 @@ config NFC_PORT100
 	  RC-S380 dongle.
 
 	  If unsure, say N.
+
+config NFC_PN547
+	tristate "PN547 NFC driver"
+	depends on I2C
+	help
+	  NXP PN547 driver.
 
 source "drivers/nfc/pn544/Kconfig"
 source "drivers/nfc/microread/Kconfig"

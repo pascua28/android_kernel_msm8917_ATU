@@ -27,6 +27,14 @@
 #ifdef TARGET_HW_MDSS_HDMI
 #include "mdss_dba_utils.h"
 #endif
+#ifdef CONFIG_LCDKIT_DRIVER
+#include "lcdkit_dsi_panel.h"
+#endif
+
+#ifdef CONFIG_HW_ZEROHUNG
+#include <chipset_common/hwzrhung/hung_wp_screen.h>
+#endif
+
 #define DT_CMD_HDR 6
 #define MIN_REFRESH_RATE 48
 #define DEFAULT_MDP_TRANSFER_TIME 14000
@@ -127,11 +135,19 @@ static void mdss_dsi_panel_bklt_pwm(struct mdss_dsi_ctrl_pdata *ctrl, int level)
 	}
 }
 
+#ifndef CONFIG_LCDKIT_DRIVER
 static char dcs_cmd[2] = {0x54, 0x00}; /* DTYPE_DCS_READ */
 static struct dsi_cmd_desc dcs_read_cmd = {
 	{DTYPE_DCS_READ, 1, 0, 1, 5, sizeof(dcs_cmd)},
 	dcs_cmd
 };
+#else
+static char dcs_cmd[2] = {0x54, 0x00}; /* DTYPE_DCS_READ */
+static struct dsi_cmd_desc dcs_read_cmd = {
+	{DTYPE_DCS_READ, 1, 0, 1, 5, sizeof(dcs_cmd)},
+	dcs_cmd
+};
+#endif
 
 int mdss_dsi_panel_cmd_read(struct mdss_dsi_ctrl_pdata *ctrl, char cmd0,
 		char cmd1, void (*fxn)(int), char *rbuf, int len)
@@ -209,6 +225,7 @@ static void mdss_dsi_panel_cmds_send(struct mdss_dsi_ctrl_pdata *ctrl,
 	mdss_dsi_cmdlist_put(ctrl, &cmdreq);
 }
 
+#ifndef CONFIG_LCDKIT_DRIVER
 static char led_pwm1[2] = {0x51, 0x0};	/* DTYPE_DCS_WRITE1 */
 static struct dsi_cmd_desc backlight_cmd = {
 	{DTYPE_DCS_WRITE1, 1, 0, 0, 1, sizeof(led_pwm1)},
@@ -239,6 +256,7 @@ static void mdss_dsi_panel_bklt_dcs(struct mdss_dsi_ctrl_pdata *ctrl, int level)
 
 	mdss_dsi_cmdlist_put(ctrl, &cmdreq);
 }
+#endif
 
 static void mdss_dsi_panel_set_idle_mode(struct mdss_panel_data *pdata,
 							bool enable)
@@ -293,6 +311,7 @@ static int mdss_dsi_request_gpios(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 {
 	int rc = 0;
 
+#if 0
 	if (gpio_is_valid(ctrl_pdata->disp_en_gpio)) {
 		rc = gpio_request(ctrl_pdata->disp_en_gpio,
 						"disp_enable");
@@ -302,12 +321,14 @@ static int mdss_dsi_request_gpios(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 			goto disp_en_gpio_err;
 		}
 	}
+#endif
 	rc = gpio_request(ctrl_pdata->rst_gpio, "disp_rst_n");
 	if (rc) {
 		pr_err("request reset gpio failed, rc=%d\n",
 			rc);
 		goto rst_gpio_err;
 	}
+#if 0
 	if (gpio_is_valid(ctrl_pdata->bklt_en_gpio)) {
 		rc = gpio_request(ctrl_pdata->bklt_en_gpio,
 						"bklt_enable");
@@ -317,6 +338,7 @@ static int mdss_dsi_request_gpios(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 			goto bklt_en_gpio_err;
 		}
 	}
+#endif
 	if (gpio_is_valid(ctrl_pdata->mode_gpio)) {
 		rc = gpio_request(ctrl_pdata->mode_gpio, "panel_mode");
 		if (rc) {
@@ -325,8 +347,25 @@ static int mdss_dsi_request_gpios(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 			goto mode_gpio_err;
 		}
 	}
+#if 0
+	#ifdef CONFIG_LCDKIT_DRIVER
+	if (gpio_is_valid(ctrl_pdata->disp_bl_gpio)) {
+		rc = gpio_request(ctrl_pdata->disp_bl_gpio,
+						"bl_enable");
+		if (rc) {
+			pr_err("request bl gpio failed, rc=%d\n",
+				       rc);
+			goto bl_en_gpio_err;
+		}
+	}
+	#endif
+#endif
 	return rc;
-
+#ifdef CONFIG_LCDKIT_DRIVER
+bl_en_gpio_err:
+	if (gpio_is_valid(ctrl_pdata->mode_gpio))
+		gpio_free(ctrl_pdata->mode_gpio);
+#endif
 mode_gpio_err:
 	if (gpio_is_valid(ctrl_pdata->bklt_en_gpio))
 		gpio_free(ctrl_pdata->bklt_en_gpio);
@@ -339,6 +378,7 @@ disp_en_gpio_err:
 	return rc;
 }
 
+#ifndef CONFIG_LCDKIT_DRIVER
 int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 {
 	struct mdss_dsi_ctrl_pdata *ctrl_pdata = NULL;
@@ -489,7 +529,7 @@ int mdss_dsi_panel_reset(struct mdss_panel_data *pdata, int enable)
 exit:
 	return rc;
 }
-
+#endif
 /**
  * mdss_dsi_roi_merge() -  merge two roi into single roi
  *
@@ -795,6 +835,13 @@ static void mdss_dsi_panel_bl_ctrl(struct mdss_panel_data *pdata,
 	if ((bl_level < pdata->panel_info.bl_min) && (bl_level != 0))
 		bl_level = pdata->panel_info.bl_min;
 
+    #ifdef CONFIG_LCDKIT_DRIVER
+    lcdkit_record_bl_level(bl_level);
+    lcdkit_delay(lcdkit_info.panel_infos.delay_bf_bl);
+    #endif
+    #ifdef CONFIG_HW_ZEROHUNG
+    hung_wp_screen_setbl(bl_level);
+    #endif
 	switch (ctrl_pdata->bklt_ctrl) {
 	case BL_WLED:
 		led_trigger_event(bl_led_trigger, bl_level);
@@ -826,6 +873,11 @@ static void mdss_dsi_panel_bl_ctrl(struct mdss_panel_data *pdata,
 				mdss_dsi_panel_bklt_dcs(sctrl, bl_level);
 		}
 		break;
+	#ifdef CONFIG_LCDKIT_DRIVER
+	case BL_IC_TI:
+		lcdkit_dsi_panel_bklt_IC_TI(ctrl_pdata, bl_level);
+		break;
+	#endif
 	default:
 		pr_err("%s: Unknown bl_ctrl configuration\n",
 			__func__);
@@ -848,7 +900,7 @@ static void mdss_dsi_panel_on_hdmi(struct mdss_dsi_ctrl_pdata *ctrl,
 	(void)(*pinfo);
 }
 #endif
-
+#ifndef CONFIG_LCDKIT_DRIVER
 static int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 {
 	struct mdss_dsi_ctrl_pdata *ctrl = NULL;
@@ -896,6 +948,7 @@ end:
 	pr_debug("%s:-\n", __func__);
 	return ret;
 }
+#endif
 
 #ifdef TARGET_HW_MDSS_HDMI
 static void mdss_dsi_post_panel_on_hdmi(struct mdss_panel_info *pinfo)
@@ -967,6 +1020,7 @@ static void mdss_dsi_panel_off_hdmi(struct mdss_dsi_ctrl_pdata *ctrl,
 }
 #endif
 
+#ifndef CONFIG_LCDKIT_DRIVER
 static int mdss_dsi_panel_off(struct mdss_panel_data *pdata)
 {
 	struct mdss_dsi_ctrl_pdata *ctrl = NULL;
@@ -999,6 +1053,7 @@ end:
 	pr_debug("%s:-\n", __func__);
 	return 0;
 }
+#endif
 
 static int mdss_dsi_panel_low_power_config(struct mdss_panel_data *pdata,
 	int enable)
@@ -1649,7 +1704,7 @@ static void mdss_panel_parse_te_params(struct device_node *np,
 	te->wr_ptr_irq = 0;
 }
 
-
+#ifndef CONFIG_LCDKIT_DRIVER
 static int mdss_dsi_parse_reset_seq(struct device_node *np,
 		u32 rst_seq[MDSS_DSI_RST_SEQ_LEN], u32 *rst_len,
 		const char *name)
@@ -1747,6 +1802,7 @@ static int mdss_dsi_nt35596_read_status(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 		return 1;
 	}
 }
+#endif
 
 static void mdss_dsi_parse_roi_alignment(struct device_node *np,
 		struct dsi_panel_timing *pt)
@@ -1845,6 +1901,7 @@ exit:
 	return;
 }
 
+#ifndef CONFIG_LCDKIT_DRIVER
 /* the length of all the valid values to be checked should not be great
  * than the length of returned data from read command.
  */
@@ -2008,6 +2065,7 @@ error1:
 error:
 	pinfo->esd_check_enabled = false;
 }
+#endif
 
 static int mdss_dsi_parse_panel_features(struct device_node *np,
 	struct mdss_dsi_ctrl_pdata *ctrl)
@@ -2217,6 +2275,7 @@ static void mdss_dsi_parse_dfps_config(struct device_node *pan_node,
 	return;
 }
 
+#ifndef CONFIG_LCDKIT_DRIVER
 int mdss_panel_parse_bl_settings(struct device_node *np,
 			struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 {
@@ -2277,6 +2336,7 @@ int mdss_panel_parse_bl_settings(struct device_node *np,
 	}
 	return 0;
 }
+#endif
 
 int mdss_dsi_panel_timing_switch(struct mdss_dsi_ctrl_pdata *ctrl,
 			struct mdss_panel_timing *timing)
@@ -2326,6 +2386,7 @@ void mdss_dsi_unregister_bl_settings(struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 		led_trigger_unregister_simple(bl_led_trigger);
 }
 
+#ifndef CONFIG_LCDKIT_DRIVER
 static int mdss_dsi_panel_timing_from_dt(struct device_node *np,
 		struct dsi_panel_timing *pt,
 		struct mdss_panel_data *panel_data)
@@ -2549,6 +2610,7 @@ exit:
 
 	return rc;
 }
+#endif
 
 #ifdef TARGET_HW_MDSS_HDMI
 static int mdss_panel_parse_dt_hdmi(struct device_node *np,
@@ -2583,6 +2645,7 @@ static int mdss_panel_parse_dt_hdmi(struct device_node *np,
 	return 0;
 }
 #endif
+#ifndef CONFIG_LCDKIT_DRIVER
 static int mdss_panel_parse_dt(struct device_node *np,
 			struct mdss_dsi_ctrl_pdata *ctrl_pdata)
 {
@@ -2880,3 +2943,7 @@ int mdss_dsi_panel_init(struct device_node *node,
 	ctrl_pdata->panel_data.get_idle = mdss_dsi_panel_get_idle_mode;
 	return 0;
 }
+#endif
+#ifdef CONFIG_LCDKIT_DRIVER
+#include "lcdkit_dsi_panel.c"
+#endif

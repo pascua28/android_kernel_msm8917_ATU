@@ -194,6 +194,9 @@
 #define QPNP_WLED_MIN_MSLEEP		20
 #define QPNP_WLED_SC_DLY_MS		20
 
+#ifdef CONFIG_LCDKIT_DRIVER
+bool lcdkit_is_default_panel(void);
+#endif
 #define NUM_SUPPORTED_AVDD_VOLTAGES		6
 #define QPNP_WLED_AVDD_DEFAULT_VOLTAGE_MV	7600
 #define QPNP_WLED_AVDD_MIN_TRIM_VALUE		0x0
@@ -802,6 +805,11 @@ static void qpnp_wled_work(struct work_struct *work)
 	mutex_lock(&wled->cdev.led_access);
 
 	level = wled->cdev.brightness;
+#ifdef CONFIG_LCDKIT_DRIVER
+	if(lcdkit_is_default_panel()){
+		level = 0;
+	}
+#endif
 
 	if (level) {
 		rc = qpnp_wled_set_level(wled, level);
