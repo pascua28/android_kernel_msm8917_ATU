@@ -208,8 +208,7 @@ int ion_share_dma_buf_fd(struct ion_client *client, struct ion_handle *handle);
  * another exporter is passed in this function will return ERR_PTR(-EINVAL)
  */
 struct ion_handle *ion_import_dma_buf(struct ion_client *client, int fd);
-extern unsigned long get_ion_total(void);
-int dump_ion_memory_info(bool verbose);
+
 #else
 static inline void ion_reserve(struct ion_platform_data *data)
 {
@@ -269,11 +268,6 @@ static inline struct ion_handle *ion_import_dma_buf(struct ion_client *client, i
 
 static inline int ion_handle_get_flags(struct ion_client *client,
 	struct ion_handle *handle, unsigned long *flags)
-{
-	return -ENODEV;
-}
-
-static inline unsigned long get_ion_total(void)
 {
 	return -ENODEV;
 }
