@@ -57,7 +57,9 @@
 #include "mdss_smmu.h"
 
 #include "mdss_mdp_trace.h"
-
+#ifdef CONFIG_LCDKIT_DRIVER
+#include <linux/lcdkit_dsm.h>
+#endif
 #define AXI_HALT_TIMEOUT_US	0x4000
 #define AUTOSUSPEND_TIMEOUT_MS	200
 #define DEFAULT_MDP_PIPE_WIDTH	2048
@@ -1488,6 +1490,12 @@ void mdss_mdp_clk_ctrl(int enable)
 				changed++;
 		} else {
 			pr_err("Can not be turned off\n");
+#ifdef CONFIG_HUAWEI_DSM
+			/* report mdp clk dsm error */
+			#ifdef CONFIG_LCDKIT_DRIVER
+			lcdkit_report_dsm_err(DSM_LCD_MDSS_MDP_CLK_ERROR_NO,0,0,0);
+			#endif
+#endif
 		}
 	}
 
@@ -1594,7 +1602,12 @@ static int mdss_mdp_gdsc_notifier_call(struct notifier_block *self,
 
 	mdata = container_of(self, struct mdss_data_type, gdsc_cb);
 
+#ifdef CONFIG_LCDKIT_DRIVER
+	if (!mdss_mdp_req_init_restore_cfg(mdata) &&
+		(event & REGULATOR_EVENT_ENABLE)) {
+#else
 	if (event & REGULATOR_EVENT_ENABLE) {
+#endif
 		/*
 		 * As SMMU in low tier targets is not power collapsible,
 		 * hence we don't need to restore sec configuration.

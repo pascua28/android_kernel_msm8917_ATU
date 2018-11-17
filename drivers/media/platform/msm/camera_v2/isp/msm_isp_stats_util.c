@@ -225,7 +225,7 @@ static int32_t msm_isp_stats_buf_divert(struct vfe_device *vfe_dev,
 		rc = vfe_dev->buf_mgr->ops->buf_done(
 			vfe_dev->buf_mgr,
 			done_buf->bufq_handle,
-			done_buf->buf_idx, &ts->buf_time, frame_id, 0);
+			done_buf->buf_idx, &ts->buf_time, frame_id, 0, false);
 		if (rc == -EFAULT)
 			msm_isp_halt_send_error(vfe_dev,
 					ISP_EVENT_BUF_FATAL_ERROR);
@@ -320,7 +320,7 @@ void msm_isp_process_stats_irq(struct vfe_device *vfe_dev,
 		get_comp_mask(irq_status0, irq_status1);
 	stats_irq_mask = vfe_dev->hw_info->vfe_ops.stats_ops.
 		get_wm_mask(irq_status0, irq_status1);
-	if (!(stats_comp_mask || stats_irq_mask))
+	if (!(stats_comp_mask || stats_irq_mask) || vfe_dev->ignore_irq)
 		return;
 
 	ISP_DBG("%s: vfe %d status: 0x%x\n", __func__, vfe_dev->pdev->id,

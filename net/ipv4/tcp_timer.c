@@ -22,6 +22,10 @@
 #include <linux/gfp.h>
 #include <net/tcp.h>
 
+#ifdef CONFIG_HW_WIFIPRO
+#include <hwnet/ipv4/wifipro_tcp_monitor.h>
+#endif
+
 int sysctl_tcp_syn_retries __read_mostly = TCP_SYN_RETRIES;
 int sysctl_tcp_synack_retries __read_mostly = TCP_SYNACK_RETRIES;
 int sysctl_tcp_keepalive_time __read_mostly = TCP_KEEPALIVE_TIME;
@@ -31,6 +35,11 @@ int sysctl_tcp_retries1 __read_mostly = TCP_RETR1;
 int sysctl_tcp_retries2 __read_mostly = TCP_RETR2;
 int sysctl_tcp_orphan_retries __read_mostly;
 int sysctl_tcp_thin_linear_timeouts __read_mostly;
+
+#ifdef CONFIG_HUAWEI_MSS_AUTO_CHANGE
+extern void tcp_reduce_mss(struct inet_connection_sock *icsk, struct sock *sk);
+
+#endif
 
 /*Function to reset tcp_ack related sysctl on resetting master control */
 void set_tcp_default(void)
@@ -223,7 +232,9 @@ static int tcp_write_timeout(struct sock *sk)
 		if (retransmits_timed_out(sk, sysctl_tcp_retries1, 0, 0)) {
 			/* Black hole detection */
 			tcp_mtu_probing(icsk, sk);
-
+#ifdef CONFIG_HUAWEI_MSS_AUTO_CHANGE
+            tcp_reduce_mss(icsk, sk);
+#endif
 			dst_negative_advice(sk);
 		}
 
@@ -503,6 +514,13 @@ void tcp_retransmit_timer(struct sock *sk)
 	 */
 	icsk->icsk_backoff++;
 	icsk->icsk_retransmits++;
+
+#ifdef CONFIG_HW_WIFIPRO
+	if (is_wifipro_on) {
+	    wifipro_handle_retrans(sk, icsk);
+	}
+#endif
+
 
 out_reset_timer:
 	/* If stream is thin, use linear timeouts. Since 'icsk_backoff' is

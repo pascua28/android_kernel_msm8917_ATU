@@ -748,8 +748,8 @@ static int msm_isp_update_put_buf_cnt(struct msm_isp_buf_mgr *buf_mgr,
 	rc = msm_isp_update_put_buf_cnt_unsafe(buf_mgr, id, bufq_handle,
 		buf_index, tv, frame_id, pingpong_bit);
 	if (-ENOTEMPTY == rc) {
-		pr_err("%s: Error! Uncleared put_buf_mask for pingpong(%d) from vfe %d bufq 0x%x buf_idx %d\n",
-			__func__, pingpong_bit, id, bufq_handle, buf_index);
+		pr_err("%s: Error! Uncleared put_buf_mask for pingpong(%d) from vfe %d bufq 0x%x buf_idx %d stream_id %x\n",
+			__func__, pingpong_bit, id, bufq_handle, buf_index, bufq->stream_id);
 		msm_isp_dump_ping_pong_mismatch();
 		rc = -EFAULT;
 	}
@@ -759,7 +759,7 @@ static int msm_isp_update_put_buf_cnt(struct msm_isp_buf_mgr *buf_mgr,
 
 static int msm_isp_buf_done(struct msm_isp_buf_mgr *buf_mgr,
 	uint32_t bufq_handle, uint32_t buf_index,
-	struct timeval *tv, uint32_t frame_id, uint32_t output_format)
+	struct timeval *tv, uint32_t frame_id, uint32_t output_format, bool is_empty_buffer)
 {
 	int rc = 0;
 	unsigned long flags;
@@ -788,7 +788,7 @@ static int msm_isp_buf_done(struct msm_isp_buf_mgr *buf_mgr,
 			spin_unlock_irqrestore(&bufq->bufq_lock, flags);
 			buf_mgr->vb2_ops->buf_done(buf_info->vb2_buf,
 				bufq->session_id, bufq->stream_id,
-				frame_id, tv, output_format);
+				frame_id, tv, output_format, is_empty_buffer);
 		} else {
 			spin_unlock_irqrestore(&bufq->bufq_lock, flags);
 		}
@@ -925,7 +925,7 @@ static int msm_isp_buf_enqueue(struct msm_isp_buf_mgr *buf_mgr,
 				buf_info->buf_debug.put_state_last ^= 1;
 				rc = msm_isp_buf_done(buf_mgr,
 					info->handle, info->buf_idx,
-					buf_info->tv, buf_info->frame_id, 0);
+					buf_info->tv, buf_info->frame_id, 0, false);
 			}
 		}
 	} else {
@@ -1034,9 +1034,8 @@ static int msm_isp_request_bufq(struct msm_isp_buf_mgr *buf_mgr,
 
 		return -EINVAL;
 	}
-
-	bufq->bufs = kzalloc(sizeof(struct msm_isp_buffer) *
-		buf_request->num_buf, GFP_KERNEL);
+	bufq->bufs = vzalloc(sizeof(struct msm_isp_buffer) *
+		buf_request->num_buf);
 	if (!bufq->bufs) {
 		pr_err("No free memory for buf info\n");
 		msm_isp_free_bufq_handle(buf_mgr, buf_request->handle);
@@ -1081,7 +1080,7 @@ static int msm_isp_release_bufq(struct msm_isp_buf_mgr *buf_mgr,
 	msm_isp_buf_unprepare_all(buf_mgr, bufq_handle);
 
 	spin_lock_irqsave(&bufq->bufq_lock, flags);
-	kfree(bufq->bufs);
+	vfree(bufq->bufs);
 	msm_isp_free_bufq_handle(buf_mgr, bufq_handle);
 	spin_unlock_irqrestore(&bufq->bufq_lock, flags);
 
@@ -1102,7 +1101,7 @@ static void msm_isp_release_all_bufq(
 		msm_isp_buf_unprepare_all(buf_mgr, bufq->bufq_handle);
 
 		spin_lock_irqsave(&bufq->bufq_lock, flags);
-		kfree(bufq->bufs);
+		vfree(bufq->bufs);
 		msm_isp_free_bufq_handle(buf_mgr, bufq->bufq_handle);
 		spin_unlock_irqrestore(&bufq->bufq_lock, flags);
 	}

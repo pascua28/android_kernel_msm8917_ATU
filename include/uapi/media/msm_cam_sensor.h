@@ -16,6 +16,8 @@
 #define MAX_SENSOR_NAME 32
 #define MAX_ACTUATOR_AF_TOTAL_STEPS 1024
 
+#define MAX_SENSOR_NAME_64 64
+
 #define MAX_OIS_MOD_NAME_SIZE 32
 #define MAX_OIS_NAME_SIZE 32
 #define MAX_OIS_REG_SETTINGS 800
@@ -260,6 +262,9 @@ enum eeprom_cfg_type_t {
 	CFG_EEPROM_WRITE_DATA,
 	CFG_EEPROM_GET_MM_INFO,
 	CFG_EEPROM_INIT,
+/****************************HUAWEI_ADD_BEGIN*****************************/
+	CFG_EEPROM_FRESH_MEM_DATA,
+/****************************HUAWEI_ADD_END*****************************/
 };
 
 struct eeprom_get_t {
@@ -311,6 +316,48 @@ struct msm_eeprom_cfg_data {
 	} cfg;
 };
 
+/****************************HUAWEI_ADD_BEGIN*****************************/
+#ifndef MAX_SUPPORT_SENSOR_COUNT
+#define MAX_SUPPORT_SENSOR_COUNT 2
+#endif
+#ifndef APP_INFO_MAX_LINE_LEN
+#define APP_INFO_MAX_LINE_LEN 128
+#endif
+
+struct msm_support_product_name_info {
+    char product_name_info[MAX_SUPPORT_SENSOR_COUNT][APP_INFO_MAX_LINE_LEN];
+};
+
+struct msm_sensor_mmi_otp_flag
+{
+    uint16_t mmi_otp_check_flag;
+};
+
+struct msm_sensor_awb_otp_info
+{
+    uint16_t RG;
+    uint16_t BG;
+    uint32_t typical_RG;
+    uint32_t typical_BG;
+};
+struct msm_sensor_afc_otp_info
+{
+    uint16_t starting_dac;
+    uint16_t infinity_dac;
+    uint16_t macro_dac;
+};
+
+#define CUSTOM_CFG_MSM_SENSOR \
+        CFG_START_FRM_CNT, \
+        CFG_STOP_FRM_CNT, \
+        CFG_GET_OTP_FLAG, \
+        CFG_SET_AFC_OTP_INFO, \
+        CFG_SET_AWB_OTP_INFO, \
+        CFG_SET_LSC_OTP_INFO, \
+        CFG_CUSTOM_MAX
+
+/****************************HUAWEI_ADD_END*****************************/
+
 enum msm_sensor_cfg_type_t {
 	CFG_SET_SLAVE_INFO,
 	CFG_SLAVE_READ_I2C,
@@ -342,6 +389,9 @@ enum msm_sensor_cfg_type_t {
 	CFG_WRITE_I2C_ARRAY_ASYNC,
 	CFG_WRITE_I2C_ARRAY_SYNC,
 	CFG_WRITE_I2C_ARRAY_SYNC_BLOCK,
+/****************************HUAWEI_ADD_BEGIN*****************************/
+	CUSTOM_CFG_MSM_SENSOR,
+/****************************HUAWEI_ADD_END*****************************/
 };
 
 enum msm_actuator_cfg_type_t {
@@ -548,7 +598,28 @@ enum msm_sensor_init_cfg_type_t {
 	CFG_SINIT_PROBE,
 	CFG_SINIT_PROBE_DONE,
 	CFG_SINIT_PROBE_WAIT_DONE,
+/****************************HUAWEI_ADD_BEGIN*****************************/
+	CFG_SINIT_GET_PRODUCT_NAME,
+	CFG_SINIT_SET_SENSOR_NAME,
+/****************************HUAWEI_ADD_END*****************************/
 };
+
+/***************************HUAWEI_ADD_BEGIN***************************/
+enum hw_sensor_pos_t {
+	HW_BACK_CAMERA,
+	HW_FRONT_CAMERA,
+	HW_MAX_CAMERA,
+};
+
+struct hw_camera_app_info_t {
+	char	camera_name[MAX_SENSOR_NAME_64];
+	char	label[MAX_SENSOR_NAME_64];
+};
+
+struct hw_camera_app_info_array_t {
+	struct hw_camera_app_info_t app_info[HW_MAX_CAMERA];
+};
+/***************************HUAWEI_ADD_END*****************************/
 
 struct sensor_init_cfg_data {
 	enum msm_sensor_init_cfg_type_t cfgtype;

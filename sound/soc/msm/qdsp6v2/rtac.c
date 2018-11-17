@@ -51,6 +51,11 @@ struct rtac_cal_block_data	rtac_cal[MAX_RTAC_BLOCKS] = {
 	{{RTAC_BUF_SIZE, 0, 0, 0}, {0, 0, 0} }
 };
 
+static struct kmem_cache *rtac_adm_cachep;
+static struct kmem_cache *rtac_afe_cachep;
+static struct kmem_cache *rtac_asm_cachep;
+static struct kmem_cache *rtac_voice_cachep;
+
 struct rtac_common_data {
 	atomic_t			usage_count;
 	atomic_t			apr_err_code;
@@ -1872,9 +1877,16 @@ static int __init rtac_init(void)
 	init_waitqueue_head(&rtac_adm_apr_data.cmd_wait);
 	mutex_init(&rtac_adm_mutex);
 	mutex_init(&rtac_adm_apr_mutex);
+	rtac_adm_cachep = kmem_cache_create("rtac_adm_cache",
+				rtac_cal[ADM_RTAC_CAL].map_data.map_size, 0,
+				SLAB_HWCACHE_ALIGN, NULL);
+	if (rtac_adm_cachep == NULL) {
+		pr_err("%s: Unable to create rtac adm cache\n", __func__);
+		goto nomem;
+	}
 
-	rtac_adm_buffer = kzalloc(
-		rtac_cal[ADM_RTAC_CAL].map_data.map_size, GFP_KERNEL);
+	rtac_adm_buffer = kmem_cache_zalloc(
+		rtac_adm_cachep, GFP_KERNEL);
 	if (rtac_adm_buffer == NULL) {
 		pr_err("%s: Could not allocate payload of size = %d\n",
 			__func__, rtac_cal[ADM_RTAC_CAL].map_data.map_size);
@@ -1889,12 +1901,20 @@ static int __init rtac_init(void)
 	}
 	mutex_init(&rtac_asm_apr_mutex);
 
-	rtac_asm_buffer = kzalloc(
-		rtac_cal[ASM_RTAC_CAL].map_data.map_size, GFP_KERNEL);
+	rtac_asm_cachep = kmem_cache_create("rtac_asm_cache",
+				rtac_cal[ASM_RTAC_CAL].map_data.map_size, 0,
+				SLAB_HWCACHE_ALIGN, NULL);
+	if (rtac_asm_cachep == NULL) {
+		pr_err("%s: Unable to create rtac asm cache\n", __func__);
+		goto nomem;
+	}
+
+	rtac_asm_buffer = kmem_cache_zalloc(
+		rtac_asm_cachep, GFP_KERNEL);
 	if (rtac_asm_buffer == NULL) {
 		pr_err("%s: Could not allocate payload of size = %d\n",
 			__func__, rtac_cal[ASM_RTAC_CAL].map_data.map_size);
-		kzfree(rtac_adm_buffer);
+		kmem_cache_free(rtac_adm_cachep, rtac_adm_buffer);
 		goto nomem;
 	}
 
@@ -1904,13 +1924,21 @@ static int __init rtac_init(void)
 	init_waitqueue_head(&rtac_afe_apr_data.cmd_wait);
 	mutex_init(&rtac_afe_apr_mutex);
 
-	rtac_afe_buffer = kzalloc(
-		rtac_cal[AFE_RTAC_CAL].map_data.map_size, GFP_KERNEL);
+	rtac_afe_cachep = kmem_cache_create("rtac_afe_cache",
+				rtac_cal[AFE_RTAC_CAL].map_data.map_size, 0,
+				SLAB_HWCACHE_ALIGN, NULL);
+	if (rtac_afe_cachep == NULL) {
+		pr_err("%s: Unable to create rtac afe cache\n", __func__);
+		goto nomem;
+	}
+
+	rtac_afe_buffer = kmem_cache_zalloc(
+		rtac_afe_cachep, GFP_KERNEL);
 	if (rtac_afe_buffer == NULL) {
 		pr_err("%s: Could not allocate payload of size = %d\n",
 			__func__, rtac_cal[AFE_RTAC_CAL].map_data.map_size);
-		kzfree(rtac_adm_buffer);
-		kzfree(rtac_asm_buffer);
+		kmem_cache_free(rtac_adm_cachep, rtac_adm_buffer);
+		kmem_cache_free(rtac_asm_cachep, rtac_asm_buffer);
 		goto nomem;
 	}
 
@@ -1924,14 +1952,22 @@ static int __init rtac_init(void)
 	mutex_init(&rtac_voice_mutex);
 	mutex_init(&rtac_voice_apr_mutex);
 
-	rtac_voice_buffer = kzalloc(
-		rtac_cal[VOICE_RTAC_CAL].map_data.map_size, GFP_KERNEL);
+	rtac_voice_cachep = kmem_cache_create("rtac_voice_cache",
+				rtac_cal[VOICE_RTAC_CAL].map_data.map_size, 0,
+				SLAB_HWCACHE_ALIGN, NULL);
+	if (rtac_voice_cachep == NULL) {
+		pr_err("%s: Unable to create rtac voice cache\n", __func__);
+		goto nomem;
+	}
+
+	rtac_voice_buffer = kmem_cache_zalloc(
+		rtac_voice_cachep, GFP_KERNEL);
 	if (rtac_voice_buffer == NULL) {
 		pr_err("%s: Could not allocate payload of size = %d\n",
 			__func__, rtac_cal[VOICE_RTAC_CAL].map_data.map_size);
-		kzfree(rtac_adm_buffer);
-		kzfree(rtac_asm_buffer);
-		kzfree(rtac_afe_buffer);
+		kmem_cache_free(rtac_adm_cachep, rtac_adm_buffer);
+		kmem_cache_free(rtac_asm_cachep, rtac_asm_buffer);
+		kmem_cache_free(rtac_afe_cachep, rtac_afe_buffer);
 		goto nomem;
 	}
 

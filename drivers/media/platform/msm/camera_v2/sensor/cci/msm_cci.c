@@ -23,6 +23,9 @@
 #include "msm_camera_io_util.h"
 #include "msm_camera_dt_util.h"
 #include "cam_hw_ops.h"
+#ifdef CONFIG_HUAWEI_DSM
+#include "msm_camera_dsm.h"
+#endif
 
 #define V4L2_IDENT_CCI 50005
 #define CCI_I2C_QUEUE_0_SIZE 64
@@ -40,6 +43,7 @@
 #undef CDBG
 #define CDBG(fmt, args...) pr_debug(fmt, ##args)
 
+#define MSM_CCI_DEBUG
 #undef CCI_DBG
 #ifdef MSM_CCI_DEBUG
 #define CCI_DBG(fmt, args...) pr_err(fmt, ##args)
@@ -1648,12 +1652,52 @@ static int32_t msm_cci_write(struct v4l2_subdev *sd,
 	return rc;
 }
 
+#ifdef CONFIG_HUAWEI_DSM
+
+static char camera_cci_dsm_log_buff[MSM_CAMERA_DSM_BUFFER_SIZE] = {0};
+static int print_cci_info(struct v4l2_subdev *sd, struct msm_camera_cci_ctrl *cci_ctrl)
+{
+	int len = 0;
+	struct cci_device *cci_dev;
+	enum cci_i2c_master_t master;
+
+	master = cci_ctrl->cci_info->cci_i2c_master;
+	cci_dev = v4l2_get_subdevdata(sd);
+
+	memset(camera_cci_dsm_log_buff, 0, MSM_CAMERA_DSM_BUFFER_SIZE);
+	len += snprintf(camera_cci_dsm_log_buff, MSM_CAMERA_DSM_BUFFER_SIZE,
+					" cci status: %d cmd: %d sid: %d\n",
+					cci_ctrl->status, cci_ctrl->cmd, cci_ctrl->cci_info->sid);
+	len += snprintf(camera_cci_dsm_log_buff+len, MSM_CAMERA_DSM_BUFFER_SIZE-len,
+					" ref_count: %d state: %d reset_pending: %d\n",
+					cci_dev->ref_count, cci_dev->cci_state, cci_dev->cci_master_info[master].reset_pending);
+	len += snprintf(camera_cci_dsm_log_buff+len, MSM_CAMERA_DSM_BUFFER_SIZE-len,
+			" CCI_IRQ_CLEAR_0_ADDR:\t\t%x\t%x\n CCI_IRQ_STATUS_0_ADDR:\t\t%x\t%x\n CCI_IRQ_GLOBAL_CLEAR_CMD_ADDR:\t\t%x\t%x\n",
+					CCI_IRQ_CLEAR_0_ADDR, msm_camera_io_r_mb(cci_dev->base + CCI_IRQ_CLEAR_0_ADDR),
+					CCI_IRQ_STATUS_0_ADDR, msm_camera_io_r_mb(cci_dev->base + CCI_IRQ_STATUS_0_ADDR),
+					CCI_IRQ_GLOBAL_CLEAR_CMD_ADDR, msm_camera_io_r_mb(cci_dev->base + CCI_IRQ_GLOBAL_CLEAR_CMD_ADDR));
+
+	return len;
+}
+#endif
+
 static int32_t msm_cci_config(struct v4l2_subdev *sd,
 	struct msm_camera_cci_ctrl *cci_ctrl)
 {
 	int32_t rc = 0;
+	struct cci_device *cci_dev;
+#ifdef CONFIG_HUAWEI_DSM
+	int dsm_rc = 0;
+#endif
 	CDBG("%s line %d cmd %d\n", __func__, __LINE__,
 		cci_ctrl->cmd);
+	cci_dev = v4l2_get_subdevdata(sd);
+	if (!cci_dev) {
+		pr_err("%s:%d cci_dev NULL\n", __func__, __LINE__);
+		return -EINVAL;
+	}
+	mutex_lock(&cci_dev->mutex);
+
 	switch (cci_ctrl->cmd) {
 	case MSM_CCI_INIT:
 		rc = msm_cci_init(sd, cci_ctrl);
@@ -1662,6 +1706,10 @@ static int32_t msm_cci_config(struct v4l2_subdev *sd,
 		rc = msm_cci_release(sd);
 		break;
 	case MSM_CCI_I2C_READ:
+		if (cci_dev->cci_state == CCI_STATE_DISABLED){
+			pr_err("%s:%d cci_dev->cci_state is invalid\n", __func__, __LINE__);
+			break;
+		}
 		rc = msm_cci_i2c_read_bytes(sd, cci_ctrl);
 		break;
 	case MSM_CCI_I2C_WRITE:
@@ -1669,6 +1717,10 @@ static int32_t msm_cci_config(struct v4l2_subdev *sd,
 	case MSM_CCI_I2C_WRITE_SYNC:
 	case MSM_CCI_I2C_WRITE_ASYNC:
 	case MSM_CCI_I2C_WRITE_SYNC_BLOCK:
+		if (cci_dev->cci_state == CCI_STATE_DISABLED){
+			pr_err("%s:%d cci_dev->cci_state is invalid\n", __func__, __LINE__);
+			break;
+		}
 		rc = msm_cci_write(sd, cci_ctrl);
 		break;
 	case MSM_CCI_GPIO_WRITE:
@@ -1681,7 +1733,20 @@ static int32_t msm_cci_config(struct v4l2_subdev *sd,
 		rc = -ENOIOCTLCMD;
 	}
 	CDBG("%s line %d rc %d\n", __func__, __LINE__, rc);
+#ifdef CONFIG_HUAWEI_DSM
+		if ((rc < 0) && ((MSM_CCI_I2C_READ == cci_ctrl->cmd) || (MSM_CCI_I2C_WRITE == cci_ctrl->cmd)) && (camera_is_closing != 1)&& (camera_is_in_probe != 1))
+		{
+			dsm_rc = print_cci_info(sd, cci_ctrl);
+			if (dsm_rc < 0)
+				pr_err("%s. cci dsm print error\n",__func__);
+
+			dsm_rc = camera_report_dsm_err(DSM_CAMERA_I2C_ERR, rc, camera_cci_dsm_log_buff);
+			if (dsm_rc < 0)
+				pr_err("%s. cci dsm report error\n",__func__);
+		}
+#endif
 	cci_ctrl->status = rc;
+	mutex_unlock(&cci_dev->mutex);
 	return rc;
 }
 
@@ -2094,6 +2159,7 @@ static int msm_cci_probe(struct platform_device *pdev)
 		return -EFAULT;
 	}
 
+	mutex_init(&new_cci_dev->mutex);
 	new_cci_dev->ref_count = 0;
 	new_cci_dev->base = msm_camera_get_reg_base(pdev, "cci", true);
 	if (!new_cci_dev->base) {
@@ -2163,6 +2229,7 @@ cci_invalid_vreg_data:
 cci_release_mem:
 	msm_camera_put_reg_base(pdev, new_cci_dev->base, "cci", true);
 cci_no_resource:
+	mutex_destroy(&new_cci_dev->mutex);
 	kfree(new_cci_dev);
 	return rc;
 }

@@ -62,7 +62,7 @@
 #define FALSE  0
 
 #define MAX_LANE_COUNT 4
-#define CSID_TIMEOUT msecs_to_jiffies(100)
+#define CSID_TIMEOUT msecs_to_jiffies(200)
 
 #undef CDBG
 #define CDBG(fmt, args...) pr_debug(fmt, ##args)
@@ -542,8 +542,8 @@ static int msm_csid_init(struct csid_device *csid_dev, uint32_t *csid_version)
 		return rc;
 	}
 
-	pr_info("%s: CSID_VERSION = 0x%x\n", __func__,
-		csid_dev->ctrl_reg->csid_reg.csid_version);
+	pr_info("%s: CSID_VERSION = 0x%x,csid %d\n", __func__,
+		csid_dev->ctrl_reg->csid_reg.csid_version,csid_dev->pdev->id);
 	/* power up */
 	rc = msm_camera_config_vreg(&csid_dev->pdev->dev, csid_dev->csid_vreg,
 		csid_dev->regulator_count, NULL, 0,
@@ -646,8 +646,8 @@ static int msm_csid_release(struct csid_device *csid_dev)
 		return -EINVAL;
 	}
 
-	CDBG("%s:%d, hw_version = 0x%x\n", __func__, __LINE__,
-		csid_dev->hw_version);
+	pr_info("%s:%d, hw_version = 0x%x,csid %d\n", __func__, __LINE__,
+		csid_dev->hw_version,csid_dev->pdev->id);
 
 	irq = msm_camera_io_r(csid_dev->base +
 		csid_dev->ctrl_reg->csid_reg.csid_irq_status_addr);
@@ -690,6 +690,22 @@ static int msm_csid_release(struct csid_device *csid_dev)
 		CAM_AHB_SUSPEND_VOTE) < 0)
 		pr_err("%s: failed to remove vote from AHB\n", __func__);
 	return 0;
+}
+
+/* optimize camera print mipi packet and frame count log*/
+static uint32_t csid_read_mipi_count(struct csid_device *csid_dev)
+{
+	uint32_t value = 0;
+	if (!csid_dev || !csid_dev->base) {
+		pr_err("%s:%d\n",__func__,__LINE__);
+		return 0;
+	}
+
+	value = msm_camera_io_r(csid_dev->base + csid_dev->ctrl_reg->csid_reg.csid_stats_total_pkts_rcvd_addr);
+
+	//pr_info("%s: csid%d total mipi packet = %u\n",__func__,csid_dev->pdev->id, value);
+
+	return value;
 }
 
 static int32_t msm_csid_cmd(struct csid_device *csid_dev, void __user *arg)
@@ -1127,6 +1143,9 @@ static int csid_probe(struct platform_device *pdev)
 		rc = -EBUSY;
 		goto csid_invalid_irq;
 	}
+
+	/* optimize camera print mipi packet and frame count log*/
+	new_csid_dev->csid_read_mipi_pkg = csid_read_mipi_count;
 
 	if (of_device_is_compatible(new_csid_dev->pdev->dev.of_node,
 		"qcom,csid-v2.0")) {

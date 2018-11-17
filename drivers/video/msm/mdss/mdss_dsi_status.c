@@ -31,9 +31,16 @@
 #include "mdss_panel.h"
 #include "mdss_mdp.h"
 
+#ifdef CONFIG_LCDKIT_DRIVER
+#include "lcdkit_dsi_status.h"
+#endif
 #define STATUS_CHECK_INTERVAL_MS 5000
 #define STATUS_CHECK_INTERVAL_MIN_MS 50
+#ifdef CONFIG_LCDKIT_DRIVER
+#define DSI_STATUS_CHECK_INIT 0
+#else
 #define DSI_STATUS_CHECK_INIT -1
+#endif
 #define DSI_STATUS_CHECK_DISABLE 1
 
 static uint32_t interval = STATUS_CHECK_INTERVAL_MS;
@@ -113,6 +120,7 @@ void disable_esd_thread(void)
 			pr_debug("esd thread killed\n");
 }
 
+#ifndef CONFIG_LCDKIT_DRIVER
 /*
  * fb_event_callback() - Call back function for the fb_register_client()
  *			 notifying events
@@ -188,6 +196,7 @@ static int fb_event_callback(struct notifier_block *self,
 	}
 	return 0;
 }
+#endif
 
 static int param_dsi_status_disable(const char *val, struct kernel_param *kp)
 {
@@ -233,7 +242,7 @@ int __init mdss_dsi_status_init(void)
 		pr_err("%s: can't allocate memory\n", __func__);
 		return -ENOMEM;
 	}
-
+#ifndef CONFIG_LCDKIT_DRIVER
 	pstatus_data->fb_notifier.notifier_call = fb_event_callback;
 
 	rc = fb_register_client(&pstatus_data->fb_notifier);
@@ -243,6 +252,7 @@ int __init mdss_dsi_status_init(void)
 		kfree(pstatus_data);
 		return -EPERM;
 	}
+#endif
 
 	pr_info("%s: DSI status check interval:%d\n", __func__,	interval);
 
@@ -255,11 +265,16 @@ int __init mdss_dsi_status_init(void)
 
 void __exit mdss_dsi_status_exit(void)
 {
+#ifndef CONFIG_LCDKIT_DRIVER
 	fb_unregister_client(&pstatus_data->fb_notifier);
+#endif
 	cancel_delayed_work_sync(&pstatus_data->check_status);
 	kfree(pstatus_data);
 	pr_debug("%s: DSI ctrl status work queue removed\n", __func__);
 }
+#ifdef CONFIG_LCDKIT_DRIVER
+#include "lcdkit_dsi_status.c"
+#endif
 
 module_param_call(interval, param_set_interval, param_get_uint,
 						&interval, 0644);

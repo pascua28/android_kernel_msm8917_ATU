@@ -140,7 +140,6 @@ enum mem_type {
 	DIRTY_DENTS,	/* indicates dirty dentry pages */
 	INO_ENTRIES,	/* indicates inode entries */
 	EXTENT_CACHE,	/* indicates extent cache */
-	INMEM_PAGES,	/* indicates inmemory pages */
 	BASE_CHECK,	/* check kernel status */
 };
 
@@ -151,10 +150,18 @@ struct nat_entry_set {
 	unsigned int entry_cnt;		/* the # of nat entries in set */
 };
 
+/*
+ * For free nid mangement
+ */
+enum nid_state {
+	NID_NEW,	/* newly added to free nid list */
+	NID_ALLOC	/* it is allocated */
+};
+
 struct free_nid {
 	struct list_head list;	/* for free node id list */
 	nid_t nid;		/* node id */
-	int state;		/* in use or not: FREE_NID or PREALLOC_NID */
+	int state;		/* in use or not: NID_NEW or NID_ALLOC */
 };
 
 static inline void next_free_nid(struct f2fs_sb_info *sbi, nid_t *nid)
@@ -163,11 +170,12 @@ static inline void next_free_nid(struct f2fs_sb_info *sbi, nid_t *nid)
 	struct free_nid *fnid;
 
 	spin_lock(&nm_i->nid_list_lock);
-	if (nm_i->nid_cnt[FREE_NID] <= 0) {
+	if (nm_i->nid_cnt[FREE_NID_LIST] <= 0) {
 		spin_unlock(&nm_i->nid_list_lock);
 		return;
 	}
-	fnid = list_first_entry(&nm_i->free_nid_list, struct free_nid, list);
+	fnid = list_first_entry(&nm_i->nid_list[FREE_NID_LIST],
+						struct free_nid, list);
 	*nid = fnid->nid;
 	spin_unlock(&nm_i->nid_list_lock);
 }
@@ -289,12 +297,13 @@ static inline void copy_node_footer(struct page *dst, struct page *src)
 
 static inline void fill_node_footer_blkaddr(struct page *page, block_t blkaddr)
 {
+	struct f2fs_sb_info *sbi = F2FS_P_SB(page);
 	struct f2fs_checkpoint *ckpt = F2FS_CKPT(F2FS_P_SB(page));
 	struct f2fs_node *rn = F2FS_NODE(page);
 	__u64 cp_ver = cur_cp_version(ckpt);
 
 	if (__is_set_ckpt_flags(ckpt, CP_CRC_RECOVERY_FLAG))
-		cp_ver |= (cur_cp_crc(ckpt) << 32);
+		cp_ver |= (sbi->ckpt_crc << 32);
 
 	rn->footer.cp_ver = cpu_to_le64(cp_ver);
 	rn->footer.next_blkaddr = cpu_to_le32(blkaddr);
@@ -302,11 +311,12 @@ static inline void fill_node_footer_blkaddr(struct page *page, block_t blkaddr)
 
 static inline bool is_recoverable_dnode(struct page *page)
 {
+	struct f2fs_sb_info *sbi = F2FS_P_SB(page);
 	struct f2fs_checkpoint *ckpt = F2FS_CKPT(F2FS_P_SB(page));
 	__u64 cp_ver = cur_cp_version(ckpt);
 
 	if (__is_set_ckpt_flags(ckpt, CP_CRC_RECOVERY_FLAG))
-		cp_ver |= (cur_cp_crc(ckpt) << 32);
+		cp_ver |= (sbi->ckpt_crc << 32);
 
 	return cp_ver == cpver_of_node(page);
 }

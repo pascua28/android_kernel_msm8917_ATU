@@ -31,9 +31,9 @@
 #include <media/msm_cam_sensor.h>
 #include <media/v4l2-subdev.h>
 #include <media/v4l2-ioctl.h>
-#include "msm_camera_i2c.h"
-#include "msm_camera_dt_util.h"
-#include "msm_sd.h"
+#include "io/msm_camera_i2c.h"
+#include "io/msm_camera_dt_util.h"
+#include "../msm_sd.h"
 
 #define DEFINE_MSM_MUTEX(mutexname) \
 	static struct mutex mutexname = __MUTEX_INITIALIZER(mutexname)
@@ -61,6 +61,8 @@ struct msm_sensor_fn_t {
 	int (*sensor_power_down)(struct msm_sensor_ctrl_t *);
 	int (*sensor_power_up)(struct msm_sensor_ctrl_t *);
 	int (*sensor_match_id)(struct msm_sensor_ctrl_t *);
+	/* optimize camera print mipi packet and frame count log*/
+	int (*sensor_read_framecount)(struct msm_sensor_ctrl_t *);
 };
 
 struct msm_sensor_ctrl_t {
@@ -84,12 +86,16 @@ struct msm_sensor_ctrl_t {
 	enum msm_sensor_state_t sensor_state;
 	uint8_t is_probe_succeed;
 	uint32_t id;
+	/* optimize camera print mipi packet and frame count log*/
+	/*add a delay work for read frame count when stream on*/
+	struct delayed_work frm_cnt_work;
 	struct device_node *of_node;
 	enum msm_camera_stream_type_t camera_stream_type;
 	uint32_t set_mclk_23880000;
 	uint8_t is_csid_tg_mode;
 	uint32_t is_secure;
 	uint8_t bypass_video_node_creation;
+	const char *product_name;
 };
 
 int msm_sensor_config(struct msm_sensor_ctrl_t *s_ctrl, void __user *argp);

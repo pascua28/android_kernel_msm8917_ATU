@@ -622,7 +622,10 @@ struct rq {
 	/* This is used to determine avg_idle's max value */
 	u64 max_idle_balance_cost;
 #endif
-
+#ifdef CONFIG_HW_VIP_THREAD
+	int active_vip_balance;
+	struct cpu_stop_work vip_balance_work;
+#endif
 #ifdef CONFIG_SCHED_HMP
 	/*
 	 * max_freq = user or thermal defined maximum
@@ -708,6 +711,10 @@ struct rq {
 #ifdef CONFIG_CPU_IDLE
 	/* Must be inspected within a rcu lock section */
 	struct cpuidle_state *idle_state;
+#endif
+#ifdef CONFIG_HW_VIP_THREAD
+    /*task list for vip thread*/
+	struct list_head vip_thread_list;
 #endif
 };
 
@@ -1973,3 +1980,65 @@ static inline u64 irq_time_read(int cpu)
 }
 #endif /* CONFIG_64BIT */
 #endif /* CONFIG_IRQ_TIME_ACCOUNTING */
+
+#ifdef CONFIG_HW_VIP_THREAD
+/*
+ * __task_rq_lock - lock the rq @p resides on.
+ */
+static inline struct rq *__task_rq_lock(struct task_struct *p)
+	__acquires(rq->lock)
+{
+	struct rq *rq;
+
+	lockdep_assert_held(&p->pi_lock);
+
+	for (;;) {
+		rq = task_rq(p);
+		raw_spin_lock(&rq->lock);
+		if (likely(rq == task_rq(p) && !task_on_rq_migrating(p)))
+			return rq;
+		raw_spin_unlock(&rq->lock);
+
+		while (unlikely(task_on_rq_migrating(p)))
+			cpu_relax();
+	}
+}
+/*
+ * task_rq_lock - lock p->pi_lock and lock the rq @p resides on.
+ */
+static inline struct rq *task_rq_lock(struct task_struct *p, unsigned long *flags)
+        __acquires(p->pi_lock)
+        __acquires(rq->lock)
+{
+        struct rq *rq;
+
+        for (;;) {
+                raw_spin_lock_irqsave(&p->pi_lock, *flags);
+                rq = task_rq(p);
+                raw_spin_lock(&rq->lock);
+                if (likely(rq == task_rq(p) && !task_on_rq_migrating(p)))
+                        return rq;
+                raw_spin_unlock(&rq->lock);
+                raw_spin_unlock_irqrestore(&p->pi_lock, *flags);
+
+                while (unlikely(task_on_rq_migrating(p)))
+                        cpu_relax();
+        }
+}
+
+static inline void __task_rq_unlock(struct rq *rq)
+	__releases(rq->lock)
+{
+	raw_spin_unlock(&rq->lock);
+}
+
+static inline void
+task_rq_unlock(struct rq *rq, struct task_struct *p, unsigned long *flags)
+        __releases(rq->lock)
+        __releases(p->pi_lock)
+{
+        raw_spin_unlock(&rq->lock);
+        raw_spin_unlock_irqrestore(&p->pi_lock, *flags);
+}
+#endif
+

@@ -79,6 +79,8 @@
 #define LAST_CPUPID_WIDTH 0
 #endif
 
+#define PROTECT_LRU_WIDTH  ({ BUILD_BUG(); 0; })
+
 /*
  * We are going to use the flags for the page to node mapping if its in
  * there.  This includes the case where there is no node, so it is implicit.

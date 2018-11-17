@@ -4966,7 +4966,15 @@ static int mdss_bl_scale_config(struct msm_fb_data_type *mfd,
 	int ret = 0;
 	int curr_bl;
 	mutex_lock(&mfd->bl_lock);
+#ifdef CONFIG_LCDKIT_DRIVER
+	if ((mfd->unset_bl_level) && (U32_MAX != mfd->unset_bl_level)){
+		curr_bl = mfd->unset_bl_level;
+	}else{
+		curr_bl = mfd->bl_level;
+	}
+#else
 	curr_bl = mfd->bl_level;
+#endif
 	mfd->bl_scale = data->scale;
 	mfd->bl_min_lvl = data->min_lvl;
 	pr_debug("update scale = %d, min_lvl = %d\n", mfd->bl_scale,

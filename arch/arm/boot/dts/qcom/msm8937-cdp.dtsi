@@ -98,23 +98,23 @@
 	tlmm_gpio_key {
 		gpio_key_active: gpio_key_active {
 			mux {
-				pins = "gpio86", "gpio91", "gpio127", "gpio128";
+				pins = "gpio91", "gpio127";
 				function = "gpio";
 			};
 
 			config {
-				pins = "gpio86", "gpio91", "gpio127", "gpio128";
+				pins = "gpio91", "gpio127";
 			};
 		};
 
 		gpio_key_suspend: gpio_key_suspend {
 			mux {
-				pins = "gpio86", "gpio91", "gpio127", "gpio128";
+				pins = "gpio91", "gpio127";
 				function = "gpio";
 			};
 
 			config {
-				pins = "gpio86", "gpio91", "gpio127", "gpio128";
+				pins = "gpio91", "gpio127";
 			};
 		};
 	};
@@ -128,7 +128,7 @@
 
 &pmi_haptic{
 	qcom,wave-play-rate-us = <4165>;
-	qcom,actuator-type = "lra";
+	qcom,actuator-type = "erm";
 	qcom,lra-auto-res-mode="qwd";
 	qcom,lra-high-z="opt1";
 	qcom,lra-res-cal-period = <4>;

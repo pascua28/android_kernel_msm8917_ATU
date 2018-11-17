@@ -642,3 +642,9 @@ endif # POWER_SUPPLY
 
 source "drivers/power/avs/Kconfig"
 source "drivers/power/qcom/Kconfig"
+source "drivers/power/hw_kstate/Kconfig"
+source "drivers/power/huawei/Kconfig"
+config HUAWEI_SLEEPLOG
+     bool "huawei sleeplog"
+     default n
+     help

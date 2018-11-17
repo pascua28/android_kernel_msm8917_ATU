@@ -702,6 +702,51 @@ static inline long __trace_sched_switch_state(struct task_struct *p)
 }
 #endif
 
+#ifdef CONFIG_HW_VIP_THREAD
+/*
+ * Tracepoint for sched vip
+ */
+DECLARE_EVENT_CLASS(sched_vip_template,
+
+	TP_PROTO(struct task_struct *p, char *msg),
+
+	TP_ARGS(__perf_task(p), msg),
+
+	TP_STRUCT__entry(
+		__array(	char,	comm,	TASK_COMM_LEN	)
+		__field(	pid_t,	pid			)
+		__field(	int,	prio			)
+		__array(	char,	msg, 	VIP_MSG_LEN	)
+		__field(	int,	target_cpu		)
+		__field(    u64,    dynamic_vip)
+		__field(    int,    vip_depth)
+	),
+
+	TP_fast_assign(
+		memcpy(__entry->comm, p->comm, TASK_COMM_LEN);
+		__entry->pid		= p->pid;
+		__entry->prio		= p->prio;
+		memcpy(__entry->msg, msg, min(VIP_MSG_LEN, strlen(msg)+1));
+		__entry->target_cpu	= task_cpu(p);
+		__entry->dynamic_vip   = atomic64_read(&p->dynamic_vip);
+		__entry->vip_depth     = p->vip_depth;
+	),
+
+	TP_printk("comm=%s pid=%d prio=%d msg=%s target_cpu=%03d dynamic_vip:%llx vip_depth:%d",
+		  __entry->comm, __entry->pid, __entry->prio,
+		  __entry->msg, __entry->target_cpu, __entry->dynamic_vip, __entry->vip_depth)
+);
+
+DEFINE_EVENT(sched_vip_template, sched_vip_queue_op,
+         TP_PROTO(struct task_struct *p, char *msg),
+	     TP_ARGS(p, msg));
+
+DEFINE_EVENT(sched_vip_template, sched_vip_sched,
+         TP_PROTO(struct task_struct *p, char *msg),
+	     TP_ARGS(p, msg));
+
+#endif
+
 /*
  * Tracepoint for task switches, performed by the scheduler:
  */

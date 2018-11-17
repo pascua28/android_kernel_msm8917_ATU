@@ -13,6 +13,7 @@
 
 #include "msm8953-pinctrl.dtsi"
 #include "msm8953-audio-mtp.dtsi"
+/*#include "msm8953-camera-sensor-mtp.dtsi"*/
 
 &spi_3 { /* BLSP1 QUP3 */
 	spi-max-frequency = <16000000>;
@@ -70,6 +71,7 @@
 		pinctrl-0 = <&gpio_key_active>;
 		pinctrl-1 = <&gpio_key_suspend>;
 
+/*
 		camera_focus {
 			label = "camera_focus";
 			gpios = <&tlmm 87 0x1>;
@@ -85,6 +87,7 @@
 			linux,code = <0x2fe>;
 			debounce-interval = <15>;
 		};
+*/
 
 		vol_up {
 			label = "volume_up";
@@ -109,7 +112,7 @@
 };
 
 &pmi_haptic{
-	qcom,actuator-type = "lra";
+	qcom,actuator-type = "erm";
 	qcom,lra-auto-res-mode="qwd";
 	qcom,lra-high-z="opt1";
 	qcom,lra-res-cal-period = <0>;
@@ -194,7 +197,8 @@
 &sdhc_1 {
 	/* device core power supply */
 	vdd-supply = <&pm8953_l8>;
-	qcom,vdd-voltage-level = <2900000 2900000>;
+	qcom,vdd-always-on;
+	qcom,vdd-voltage-level = <2950000 2950000>;
 	qcom,vdd-current-level = <200 570000>;
 
 	/* device communication power supply */

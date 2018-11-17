@@ -16,6 +16,52 @@
 
 #include <linux/device.h>
 #include <linux/sched.h>
+#ifdef CONFIG_HUAWEI_WIFI
+
+extern  int wlan_log_debug_mask;
+#define WLAN_ERROR  1
+#define WLAN_INFO 2
+#define WLAN_DBG  3
+
+/* error log */
+#ifndef wlan_log_err
+#define wlan_log_err(x...)                \
+do{                                     \
+    if( wlan_log_debug_mask >= WLAN_ERROR )   \
+    {                                   \
+        printk(KERN_ERR "wlan:" x); \
+    }                                   \
+                                        \
+}while(0)
+#endif
+/* opened at all times default*/
+
+/* info log */
+#ifndef wlan_log_info
+#define wlan_log_info(x...)               \
+do{                                     \
+    if( wlan_log_debug_mask >= WLAN_INFO)  \
+    {                                   \
+        printk(KERN_ERR "wlan:" x); \
+    }                                   \
+                                        \
+}while(0)
+#endif
+
+
+/* debug log */
+#ifndef wlan_log_debug
+#define wlan_log_debug(x...)              \
+do{                                     \
+    if ( wlan_log_debug_mask >= WLAN_DBG )   \
+    {                                   \
+        printk(KERN_ERR "wlan:" x); \
+    }                                   \
+                                        \
+}while(0)
+#endif
+
+#endif
 
 #define IRIS_REGULATORS		4
 #define PRONTO_REGULATORS	3

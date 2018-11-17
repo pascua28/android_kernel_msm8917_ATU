@@ -17,9 +17,23 @@
 #include "msm_camera_i2c_mux.h"
 #include <linux/regulator/rpm-smd-regulator.h>
 #include <linux/regulator/consumer.h>
+#ifdef CONFIG_HUAWEI_DSM
+#include "msm_camera_dsm.h"
+#endif
 
+/* optimize camera print mipi packet and frame count log*/
+#include "./msm.h"
+#include "./csid/msm_csid.h"
 #undef CDBG
 #define CDBG(fmt, args...) pr_debug(fmt, ##args)
+
+#ifdef CONFIG_HUAWEI_DSM
+void  camera_report_dsm_err_msm_sensor(struct msm_sensor_ctrl_t *s_ctrl, int type, int err_num , const char* str);
+#endif
+static int msm_sensor_check_vendor_id(struct msm_sensor_ctrl_t *s_ctrl);
+static int msm_sensor_check_cam_id(struct msm_sensor_ctrl_t *s_ctrl);
+
+static void hw_sensor_dump_mipi_pkg(int read_time);
 
 static struct msm_camera_i2c_fn_t msm_sensor_cci_func_tbl;
 static struct msm_camera_i2c_fn_t msm_sensor_secure_func_tbl;
@@ -81,8 +95,14 @@ static void msm_sensor_misc_regulator(
 
 int32_t msm_sensor_free_sensor_data(struct msm_sensor_ctrl_t *s_ctrl)
 {
+	if (!s_ctrl) {
+		return 0;
+	}
 	if (!s_ctrl->pdev && !s_ctrl->sensor_i2c_client->client)
 		return 0;
+	if (s_ctrl->sensordata && s_ctrl->sensordata->slave_info) {
+		kfree(s_ctrl->sensordata->slave_info->dump_reg_info);
+	}
 	kfree(s_ctrl->sensordata->slave_info);
 	kfree(s_ctrl->sensordata->cam_slave_info);
 	kfree(s_ctrl->sensordata->actuator_info);
@@ -210,9 +230,23 @@ int msm_sensor_power_up(struct msm_sensor_ctrl_t *s_ctrl)
 				s_ctrl->sensor_device_type, sensor_i2c_client);
 			msleep(20);
 			continue;
-		} else {
-			break;
 		}
+
+		rc = msm_sensor_check_cam_id(s_ctrl);
+		if(rc < 0){
+			msm_camera_power_down(power_info,
+				s_ctrl->sensor_device_type, sensor_i2c_client);
+	         break;
+		}
+		/*no matter cam id match or not, no need retry, break directly*/
+		rc = msm_sensor_check_vendor_id(s_ctrl);
+		if(rc < 0){
+			msm_camera_power_down(power_info,
+				s_ctrl->sensor_device_type, sensor_i2c_client);
+		}
+
+		break;
+
 	}
 
 	return rc;
@@ -278,7 +312,165 @@ int msm_sensor_match_id(struct msm_sensor_ctrl_t *s_ctrl)
 	}
 	return rc;
 }
+static uint16_t msm_sensor_vendor_id_by_mask(uint16_t sensor_id, uint16_t mask)
+{
+	if (!mask)
+		mask = ~mask;
 
+	sensor_id &= mask;
+	mask &= -mask;
+	mask -= 1;
+	while (mask) {
+		mask >>= 1;
+		sensor_id >>= 1;
+	}
+	return sensor_id;
+}
+static int msm_sensor_check_vendor_id(struct msm_sensor_ctrl_t *s_ctrl)
+{
+	int rc = 0;
+	struct msm_camera_i2c_client *sensor_i2c_client = NULL;
+	struct msm_camera_slave_info *slave_info = NULL;
+	msm_module_id_info_t module_info_back = {0};
+	const char *sensor_name = NULL;
+	unsigned short vendor_id = 0;
+
+	if (!s_ctrl || !s_ctrl->sensordata) {
+		pr_err("%s:%d failed: %pK\n",
+			__func__, __LINE__, s_ctrl);
+		return -EINVAL;
+	}
+	sensor_i2c_client = s_ctrl->sensor_i2c_client;
+	slave_info = s_ctrl->sensordata->slave_info;
+	sensor_name = s_ctrl->sensordata->sensor_name;
+
+	if (!sensor_i2c_client || !sensor_i2c_client->cci_client || !slave_info || !sensor_name) {
+		pr_err("%s:%d failed: %pK %pK %pK\n",
+			__func__, __LINE__, sensor_i2c_client, slave_info,
+			sensor_name);
+		return -EINVAL;
+	}
+
+	if(FALSE == slave_info->module_id_info.vendor_id_support){
+		pr_err("%s, %s: no need to check vendor_id", __func__, sensor_name);
+		return 0;
+	}
+
+	//back up i2c client data
+	module_info_back.vendor_id_i2c_addr = sensor_i2c_client->cci_client->sid;
+	module_info_back.vendor_id_reg_addr_type = sensor_i2c_client->addr_type;
+	//set vendor i2c client data
+	sensor_i2c_client->cci_client->sid = slave_info->module_id_info.vendor_id_i2c_addr>>1 ;
+	sensor_i2c_client->addr_type = slave_info->module_id_info.vendor_id_reg_addr_type;
+
+	rc = sensor_i2c_client->i2c_func_tbl->i2c_read(
+	sensor_i2c_client, slave_info->module_id_info.vendor_id_reg_addr,
+	&vendor_id, slave_info->module_id_info.vendor_id_data_type);
+
+	//recover i2c client data
+	sensor_i2c_client->cci_client->sid = module_info_back.vendor_id_i2c_addr ;
+	sensor_i2c_client->addr_type = module_info_back.vendor_id_reg_addr_type;
+
+	if (rc < 0) {
+		pr_err("%s: %s: read vendor id failed\n", __func__, sensor_name);
+		return rc;
+	}
+
+	if (msm_sensor_vendor_id_by_mask(vendor_id, slave_info->module_id_info.vendor_id_mask) != slave_info->module_id_info.vendor_id) {
+		pr_err("%s:%s vendor id %x does not match %x\n",
+				__func__, sensor_name,vendor_id, slave_info->module_id_info.vendor_id);
+		return -ENODEV;
+	}
+
+	return rc;
+}
+static int msm_sensor_check_cam_id(struct msm_sensor_ctrl_t *s_ctrl)
+{
+	int rc=0,mcam_id=-1;
+	const char *sensor_name = NULL;
+	unsigned gpio = 0;
+	struct pinctrl_state *pin_up = NULL;
+	struct pinctrl_state *pin_down = NULL;
+	int pullup_read = -ENODEV; //pullup id value
+	int pulldown_read = -ENODEV ; //pulldown id value
+	int read_id = 0;
+	struct msm_camera_slave_info *slave_info = NULL;
+	struct msm_pinctrl_info *sensor_ctrl = NULL;
+
+	if (!s_ctrl || !s_ctrl->sensordata ||!s_ctrl->sensordata->power_info.gpio_conf ||
+		!s_ctrl->sensordata->power_info.gpio_conf->gpio_num_info) {
+		pr_err("%s:%d failed: %pK\n",
+			__func__, __LINE__, s_ctrl);
+		return -EINVAL;
+	}
+
+	slave_info = s_ctrl->sensordata->slave_info;
+	sensor_ctrl = &s_ctrl->sensordata->power_info.pinctrl_info;
+	sensor_name = s_ctrl->sensordata->sensor_name;
+
+	if (!slave_info || !sensor_ctrl || !sensor_name) {
+		pr_err("%s:%d failed: %pK %pK %pK\n",
+			__func__, __LINE__, slave_info, sensor_ctrl,
+			sensor_name);
+		return -EINVAL;
+	}
+
+	if(!s_ctrl->sensordata->power_info.gpio_conf->gpio_num_info->valid[SENSOR_GPIO_CAM_ID])
+		return 0;
+
+	if(MSM_MODULE_ID_INVALID == slave_info->module_id_info.module_id){
+		pr_err("%s, %s,  no need to check moudle id", __func__, sensor_name);
+		return 0;
+	}
+
+	gpio=s_ctrl->sensordata->power_info.gpio_conf->gpio_num_info->gpio_num[SENSOR_GPIO_CAM_ID];
+	pin_up = pinctrl_lookup_state(sensor_ctrl->pinctrl, "cam_up");
+	pin_down = pinctrl_lookup_state(sensor_ctrl->pinctrl, "cam_down");
+
+	if (IS_ERR_OR_NULL(pin_up) && IS_ERR_OR_NULL(pin_down)){
+		gpio_direction_input(gpio);
+		mcam_id=gpio_get_value(gpio);
+		if(mcam_id == slave_info->module_id_info.module_id){
+			pr_err("%s:%s gpio %d except value:%d match",__func__,sensor_name,gpio,mcam_id);
+			return 0;
+		}else{
+			pr_err("%s:%s gpio %d value:%d not match",__func__,sensor_name,gpio,mcam_id);
+			return -ENODEV;
+		}
+	}else if((!IS_ERR_OR_NULL(pin_up)) && (!IS_ERR_OR_NULL(pin_down))){
+		pinctrl_select_state(sensor_ctrl->pinctrl,pin_up);
+		usleep_range(80, 100);  //sleep 80 us after set pin state
+		gpio_direction_input(gpio);
+		pullup_read = gpio_get_value(gpio);
+
+		pinctrl_select_state(sensor_ctrl->pinctrl,pin_down);
+		usleep_range(80, 100);  //sleep 80 us after set pin state
+		gpio_direction_input(gpio);
+		pulldown_read = gpio_get_value(gpio);
+		CDBG("%s:the pullup_read is %d and the pulldown_read is %d .\n",__func__,pullup_read,pulldown_read);
+
+		if(pulldown_read != pullup_read){
+			read_id = MSM_MODULE_ID_PULL_NC;
+		}
+		else{
+			read_id = pullup_read;
+		}
+		if(slave_info->module_id_info.module_id == read_id){
+			CDBG("%s:%s gpio %d except value:%d match! \n",__func__,sensor_name,gpio,read_id);
+			return 0;
+		}
+		else{
+			//detect fail not match
+			pr_err("%s %d : %s module id from camera module id not match!  \n",  __func__, __LINE__,sensor_name);
+			return -ENODEV;
+		}
+	}else{
+			pr_err("%s:%s cam id read error!\n", __func__,sensor_name);
+			return -ENODEV;
+	}
+
+	return rc;
+}
 static struct msm_sensor_ctrl_t *get_sctrl(struct v4l2_subdev *sd)
 {
 	return container_of(container_of(sd, struct msm_sd_subdev, sd),
@@ -325,6 +517,91 @@ static int msm_sensor_get_af_status(struct msm_sensor_ctrl_t *s_ctrl,
 	return 0;
 }
 
+static int hw_sensor_sctrl_validate(struct msm_sensor_ctrl_t *s_ctrl)
+{
+	int rc = 0;
+
+	if ((!s_ctrl) || (!s_ctrl->sensordata) || (!s_ctrl->sensordata->slave_info)) {
+		return -EFAULT;
+	}
+
+	if ((!s_ctrl->sensor_i2c_client) || (!s_ctrl->sensor_i2c_client->i2c_func_tbl) ||
+		(!s_ctrl->sensor_i2c_client->i2c_func_tbl->i2c_read) || (!s_ctrl->sensor_i2c_client->i2c_func_tbl->i2c_write)) {
+		return -EFAULT;
+	}
+
+	if (s_ctrl->sensor_state != MSM_SENSOR_POWER_UP) {
+		pr_err("sensor state is power down, no to dump reg info\n");
+		return -EPERM;
+	}
+
+	if ((0 == s_ctrl->sensordata->slave_info->dump_reg_num)|| (!s_ctrl->sensordata->slave_info->dump_reg_info)) {
+		pr_err("sensor name:%s dump_reg_num == 0 or dump_reg_info is null\n", s_ctrl->sensordata->sensor_name);
+		return -EPERM;
+	}
+
+	return rc;
+
+}
+
+static void hw_sensor_read_write_dumpinfo(struct msm_sensor_ctrl_t *s_ctrl)
+{
+	int i = 0, rc = 0;
+	unsigned short value = 0;
+	const char * sensorname = s_ctrl->sensordata->sensor_name;
+	struct dump_reg_info_t * p_dump_reg_info = s_ctrl->sensordata->slave_info->dump_reg_info;
+	struct msm_camera_i2c_fn_t *i2c_func_tbl = s_ctrl->sensor_i2c_client->i2c_func_tbl;
+
+	pr_err("sensor name:%s,dump_reg_num:%d \n", sensorname, s_ctrl->sensordata->slave_info->dump_reg_num);
+
+	for ( i = (int)(s_ctrl->sensordata->slave_info->dump_reg_num); i > 0; --i ) {
+		if (p_dump_reg_info->reg_type == DUMP_REG_READ) {
+			rc = i2c_func_tbl->i2c_read(s_ctrl->sensor_i2c_client, p_dump_reg_info->addr,
+				&value, p_dump_reg_info->data_type);
+			if (rc < 0) {
+				pr_err("%s:%d: read the dump info of %s failed\n", __func__, __LINE__, sensorname);
+				return;
+			}
+			pr_err("read the dump info of %s : reg:0x%.4x, defalut value:0x%.4x, current value:0x%.4x\n", sensorname,
+				p_dump_reg_info->addr,
+				p_dump_reg_info->value,
+				value);
+		} else {
+			rc = i2c_func_tbl->i2c_write(s_ctrl->sensor_i2c_client, p_dump_reg_info->addr,
+				p_dump_reg_info->value, p_dump_reg_info->data_type);
+			if (rc < 0) {
+				pr_err("%s:%d: write the dump info of %s failed\n", __func__, __LINE__, sensorname);
+				return;
+			}
+			pr_err("write the dump info of %s : reg:0x%.4x, value:0x%.4x\n", sensorname,
+				p_dump_reg_info->addr,
+				p_dump_reg_info->value);
+		}
+		++p_dump_reg_info;
+	}
+
+	return;
+}
+
+static void hw_sensor_dump_reg(struct msm_sensor_ctrl_t *s_ctrl)
+{
+	int i = 0;
+	int iloop = 3;//read or write dump_info 3 times
+	int rc = hw_sensor_sctrl_validate(s_ctrl);
+
+	if (rc < 0) {
+		return;
+	}
+
+	for (i = iloop; i > 0;--i) {
+		hw_sensor_read_write_dumpinfo(s_ctrl);
+		hw_sensor_dump_mipi_pkg(i);
+		msleep(100);//sleep 100 millisecond
+	}
+
+	return;
+}
+
 static long msm_sensor_subdev_ioctl(struct v4l2_subdev *sd,
 			unsigned int cmd, void *arg)
 {
@@ -351,12 +628,162 @@ static long msm_sensor_subdev_ioctl(struct v4l2_subdev *sd,
 		msm_sensor_stop_stream(s_ctrl);
 		return 0;
 	case MSM_SD_NOTIFY_FREEZE:
+		pr_err("%s freezing dumping happen, print the dump reg info\n", __func__);
+		hw_sensor_dump_reg(s_ctrl);
 		return 0;
 	case MSM_SD_UNNOTIFY_FREEZE:
 		return 0;
 	default:
 		return -ENOIOCTLCMD;
 	}
+}
+
+/* optimize camera print mipi packet and frame count log*/
+static int read_times = 0;
+#define HW_PRINT_PACKET_NUM_TIME 5 //print 5 times
+#define HW_READ_PACKET_NUM_TIME 100 //100ms
+#define MAX_CSID_NUM 3// from dtsi qcom,csid-sd-index
+struct hw_sensor_fct {
+	char *sensor_name; //sensor name from sensor_init.c
+	uint32_t fct_reg_addr; //the frame count reg addr
+	enum msm_camera_i2c_data_type type; //frame count reg data type
+};
+
+#ifdef CONFIG_HUAWEI_DSM
+static int csi_pkg_count = 0;
+static struct sensor_frame_count{
+	int sensor_frame_read[HW_PRINT_PACKET_NUM_TIME];
+	int count;
+} sensor_frame_dsm_cnt;
+#endif
+
+static int hw_sensor_read_framecount(struct msm_sensor_ctrl_t *s_ctrl)
+{
+	int rc = -1;
+	int i = 0;
+	struct msm_camera_i2c_client *sensor_i2c_client = NULL;
+
+	if(!s_ctrl || !s_ctrl->sensordata || !s_ctrl->sensordata->sensor_name)
+		return rc;
+
+	sensor_i2c_client = s_ctrl->sensor_i2c_client;
+
+	if (!sensor_i2c_client || !sensor_i2c_client->i2c_func_tbl || !sensor_i2c_client->i2c_func_tbl->i2c_read)
+	{
+		pr_err("%s: sensor_i2c_client is NULL \n",__func__);
+		return rc;
+	}
+
+	if (s_ctrl->sensordata->slave_info)
+	{
+		if (s_ctrl->sensordata->slave_info->dump_reg_num > 0 && s_ctrl->sensordata->slave_info->dump_reg_info)
+		{
+			hw_sensor_read_write_dumpinfo(s_ctrl);
+			rc = 0;
+			return rc;
+		}
+	}
+
+	return rc;
+}
+
+static void read_framecount_work_handler(struct work_struct *work)
+{
+	struct v4l2_subdev *subdev_csids[MAX_CSID_NUM] = {NULL};
+	struct csid_device *csid_dev = NULL;
+
+	int i = 0;
+	int frm_cnt = 0;
+	uint32_t csid_pkg = 0;
+	struct msm_sensor_ctrl_t *s_ctrl = container_of(work, struct msm_sensor_ctrl_t,frm_cnt_work.work);
+	if(!s_ctrl || s_ctrl->sensor_state != MSM_SENSOR_POWER_UP || (read_times <= 0))
+	{
+		read_times = 0;
+		pr_err("%s:%d\n",__func__,__LINE__);
+		return;
+	}
+
+	//read sensor send
+	if(s_ctrl->func_tbl->sensor_read_framecount)
+	{
+		pr_info("%s: read_times[%d]\n",__func__,read_times);
+		s_ctrl->func_tbl->sensor_read_framecount(s_ctrl);
+	}
+#ifdef CONFIG_HUAWEI_DSM
+	if (sensor_frame_dsm_cnt.count < HW_PRINT_PACKET_NUM_TIME)
+	{
+		sensor_frame_dsm_cnt.sensor_frame_read[sensor_frame_dsm_cnt.count] = frm_cnt;
+		sensor_frame_dsm_cnt.count++;
+	}
+#endif
+
+	//read csid receive
+	msm_sd_get_subdevs(subdev_csids,MAX_CSID_NUM,"msm_csid");
+
+	//we have two csids
+	//uint32_t subdev_id[MAX_CSID_NUM] = {0};
+	for(i = 0; i<MAX_CSID_NUM; i++)
+	{
+		if(!subdev_csids[i])
+			continue;
+		/*
+		v4l2_subdev_call(subdev_csids[i], core, ioctl,
+			VIDIOC_MSM_SENSOR_GET_SUBDEV_ID, &subdev_id[i]);
+		*/
+		if(subdev_csids[i]->dev_priv)
+			csid_dev = subdev_csids[i]->dev_priv;
+
+		if(!csid_dev)
+		{
+			read_times = 0;
+			pr_err("%s: csid_dev[%d] is NULL \n",__func__,i);
+			continue;
+		}
+
+		//back camera use csid0, front camera use csid1
+		if(csid_dev->csid_state == CSID_POWER_UP && csid_dev->csid_read_mipi_pkg)
+		{
+			csid_pkg = csid_dev->csid_read_mipi_pkg(csid_dev);
+			pr_info("%s: csid[%d] read_times[%d] total mipi packet = %u\n",__func__,
+				csid_dev->pdev->id, read_times,csid_pkg);
+#ifdef CONFIG_HUAWEI_DSM
+			csi_pkg_count += csid_pkg;
+#endif
+			break;
+		}
+	}
+
+	read_times--;
+	if(read_times > 0) {
+		schedule_delayed_work(&s_ctrl->frm_cnt_work, msecs_to_jiffies(HW_READ_PACKET_NUM_TIME));
+	}
+#ifdef CONFIG_HUAWEI_DSM
+	else if(csi_pkg_count <= 0)
+	{
+		int len = 0;
+		int rc = 0;
+		memset(camera_dsm_log_buff, 0, MSM_CAMERA_DSM_BUFFER_SIZE);
+		len += snprintf(camera_dsm_log_buff+len, MSM_CAMERA_DSM_BUFFER_SIZE-len, "camera didn't get any frame.\n 5 frame from sensor at the beginning:\n");
+		if ((len < 0) || (len >= MSM_CAMERA_DSM_BUFFER_SIZE -1))
+			pr_err("%s %d. write dsm buf error\n",__func__,__LINE__);
+
+		for (i = 0; i < HW_PRINT_PACKET_NUM_TIME; i++)
+		{
+			len += snprintf(camera_dsm_log_buff+len, MSM_CAMERA_DSM_BUFFER_SIZE-len, "  %d", sensor_frame_dsm_cnt.sensor_frame_read[i]);
+			if ((len < 0) || (len >= MSM_CAMERA_DSM_BUFFER_SIZE -1))
+			pr_err("%s %d. write dsm buf error\n",__func__,__LINE__);
+		}
+		len += snprintf(camera_dsm_log_buff+len, MSM_CAMERA_DSM_BUFFER_SIZE-len, "\n");
+		if ((len < 0) || (len >= MSM_CAMERA_DSM_BUFFER_SIZE -1))
+			pr_err("%s %d. write dsm buf error\n",__func__,__LINE__);
+
+		rc = camera_report_dsm_err(DSM_CAMERA_SENSOR_NO_FRAME, csi_pkg_count, camera_dsm_log_buff);
+		if (rc < 0)
+		{
+			pr_err("%s. report dsm err fail.\n", __func__);
+		}
+	}
+#endif
 }
 
 #ifdef CONFIG_COMPAT
@@ -777,7 +1204,7 @@ static int msm_sensor_config32(struct msm_sensor_ctrl_t *s_ctrl,
 				break;
 			}
 			s_ctrl->sensor_state = MSM_SENSOR_POWER_UP;
-			CDBG("%s:%d sensor state %d\n", __func__, __LINE__,
+			pr_err("%s:%d sensor state %d\n", __func__, __LINE__,
 				s_ctrl->sensor_state);
 		} else {
 			rc = -EFAULT;
@@ -795,6 +1222,20 @@ static int msm_sensor_config32(struct msm_sensor_ctrl_t *s_ctrl,
 			rc = -EFAULT;
 			break;
 		}
+		/* optimize camera print mipi packet and frame count log*/
+		if(read_times > 0) {
+			pr_info("%s: cancel frm_cnt_work read_times = %d\n",__func__,read_times);
+			cancel_delayed_work_sync(&s_ctrl->frm_cnt_work);
+			read_times = 0;
+#ifdef CONFIG_HUAWEI_DSM
+			csi_pkg_count = 0;
+			sensor_frame_dsm_cnt.count = 0;
+			for (i = 0; i < HW_PRINT_PACKET_NUM_TIME; i++)
+			{
+				sensor_frame_dsm_cnt.sensor_frame_read[i] = 0;
+			}
+#endif
+		}
 		if (s_ctrl->func_tbl->sensor_power_down) {
 			if (s_ctrl->sensordata->misc_regulator)
 				msm_sensor_misc_regulator(s_ctrl, 0);
@@ -806,12 +1247,49 @@ static int msm_sensor_config32(struct msm_sensor_ctrl_t *s_ctrl,
 				break;
 			}
 			s_ctrl->sensor_state = MSM_SENSOR_POWER_DOWN;
-			CDBG("%s:%d sensor state %d\n", __func__, __LINE__,
+			pr_err("%s:%d sensor state %d\n", __func__, __LINE__,
 				s_ctrl->sensor_state);
 		} else {
 			rc = -EFAULT;
 		}
+#ifdef CONFIG_HUAWEI_DSM
+		camera_is_closing = 0;
+#endif
 		break;
+	/* optimize camera print mipi packet and frame count log*/
+	case CFG_START_FRM_CNT:
+	{
+		cancel_delayed_work_sync(&s_ctrl->frm_cnt_work);
+#ifdef CONFIG_HUAWEI_DSM
+		csi_pkg_count = 0;
+		sensor_frame_dsm_cnt.count = 0;
+		for (i = 0; i < HW_PRINT_PACKET_NUM_TIME; i++)
+		{
+			sensor_frame_dsm_cnt.sensor_frame_read[i] = 0;
+		}
+#endif
+		read_times = HW_PRINT_PACKET_NUM_TIME;
+		schedule_delayed_work(&s_ctrl->frm_cnt_work, msecs_to_jiffies(HW_READ_PACKET_NUM_TIME));
+		pr_info("%s:%s start read frame count work \n",__func__,s_ctrl->sensordata->sensor_name);
+	}
+	break;
+
+    case CFG_STOP_FRM_CNT:
+	{
+		cancel_delayed_work_sync(&s_ctrl->frm_cnt_work);
+		read_times = 0;
+#ifdef CONFIG_HUAWEI_DSM
+		csi_pkg_count = 0;
+		sensor_frame_dsm_cnt.count = 0;
+		for (i = 0; i < HW_PRINT_PACKET_NUM_TIME; i++)
+		{
+			sensor_frame_dsm_cnt.sensor_frame_read[i] = 0;
+		}
+#endif
+		pr_info("%s:%s stop read frame count work \n",__func__,s_ctrl->sensordata->sensor_name);
+	}
+	break;
+
 	case CFG_SET_STOP_STREAM_SETTING: {
 		struct msm_camera_i2c_reg_setting32 stop_setting32;
 		struct msm_camera_i2c_reg_setting *stop_setting =
@@ -1263,7 +1741,7 @@ int msm_sensor_config(struct msm_sensor_ctrl_t *s_ctrl, void __user *argp)
 				break;
 			}
 			s_ctrl->sensor_state = MSM_SENSOR_POWER_UP;
-			CDBG("%s:%d sensor state %d\n", __func__, __LINE__,
+			pr_info("%s:%d sensor state %d\n", __func__, __LINE__,
 				s_ctrl->sensor_state);
 		} else {
 			rc = -EFAULT;
@@ -1282,6 +1760,23 @@ int msm_sensor_config(struct msm_sensor_ctrl_t *s_ctrl, void __user *argp)
 			rc = -EFAULT;
 			break;
 		}
+
+		/* optimize camera print mipi packet and frame count log*/
+		if(read_times > 0) {
+			pr_info("%s: cancel frm_cnt_work read_times = %d\n",__func__,read_times);
+			cancel_delayed_work_sync(&s_ctrl->frm_cnt_work);
+			read_times = 0;
+#ifdef CONFIG_HUAWEI_DSM
+			csi_pkg_count = 0;
+			sensor_frame_dsm_cnt.count = 0;
+			for (i = 0; i < HW_PRINT_PACKET_NUM_TIME; i++)
+			{
+			  sensor_frame_dsm_cnt.sensor_frame_read[i] = 0;
+			}
+#endif
+
+		}
+
 		if (s_ctrl->func_tbl->sensor_power_down) {
 			if (s_ctrl->sensordata->misc_regulator)
 				msm_sensor_misc_regulator(s_ctrl, 0);
@@ -1293,12 +1788,49 @@ int msm_sensor_config(struct msm_sensor_ctrl_t *s_ctrl, void __user *argp)
 				break;
 			}
 			s_ctrl->sensor_state = MSM_SENSOR_POWER_DOWN;
-			CDBG("%s:%d sensor state %d\n", __func__, __LINE__,
+			pr_info("%s:%d sensor state %d\n", __func__, __LINE__,
 				s_ctrl->sensor_state);
 		} else {
 			rc = -EFAULT;
 		}
+#ifdef CONFIG_HUAWEI_DSM
+		camera_is_closing = 0;
+#endif
 		break;
+	/* optimize camera print mipi packet and frame count log*/
+	case CFG_START_FRM_CNT:
+	{
+		cancel_delayed_work_sync(&s_ctrl->frm_cnt_work);
+#ifdef CONFIG_HUAWEI_DSM
+		csi_pkg_count = 0;
+		sensor_frame_dsm_cnt.count = 0;
+		for (i = 0; i < HW_PRINT_PACKET_NUM_TIME; i++)
+		{
+			sensor_frame_dsm_cnt.sensor_frame_read[i] = 0;
+		}
+#endif
+		read_times = HW_PRINT_PACKET_NUM_TIME;
+
+		schedule_delayed_work(&s_ctrl->frm_cnt_work, msecs_to_jiffies(HW_READ_PACKET_NUM_TIME));
+		pr_info("%s:%s start read frame count work \n",__func__,s_ctrl->sensordata->sensor_name);
+	}
+	break;
+
+	case CFG_STOP_FRM_CNT:
+	{
+		cancel_delayed_work_sync(&s_ctrl->frm_cnt_work);
+		read_times = 0;
+#ifdef CONFIG_HUAWEI_DSM
+		csi_pkg_count = 0;
+		sensor_frame_dsm_cnt.count = 0;
+		for (i = 0; i < HW_PRINT_PACKET_NUM_TIME; i++)
+		{
+			sensor_frame_dsm_cnt.sensor_frame_read[i] = 0;
+		}
+#endif
+		pr_info("%s:%s stop read frame count work \n",__func__,s_ctrl->sensordata->sensor_name);
+	}
+	break;
 
 	case CFG_SET_STOP_STREAM_SETTING: {
 		struct msm_camera_i2c_reg_setting *stop_setting =
@@ -1449,6 +1981,9 @@ static struct msm_sensor_fn_t msm_sensor_func_tbl = {
 	.sensor_power_up = msm_sensor_power_up,
 	.sensor_power_down = msm_sensor_power_down,
 	.sensor_match_id = msm_sensor_match_id,
+	/* optimize camera print mipi packet and frame count log*/
+	.sensor_read_framecount = hw_sensor_read_framecount,
+
 };
 
 static struct msm_camera_i2c_fn_t msm_sensor_cci_func_tbl = {
@@ -1558,5 +2093,37 @@ int32_t msm_sensor_init_default_params(struct msm_sensor_ctrl_t *s_ctrl)
 					sensor_mount_angle / 90) << 8);
 	s_ctrl->msm_sd.sd.entity.flags = mount_pos | MEDIA_ENT_FL_DEFAULT;
 
+	/* optimize camera print mipi packet and frame count log*/
+	INIT_DELAYED_WORK(&s_ctrl->frm_cnt_work, read_framecount_work_handler);
 	return 0;
 }
+//dump mipi package
+static void hw_sensor_dump_mipi_pkg(int read_time)
+{
+	uint32_t csid_pkg = 0;
+	int i = 0;
+	struct csid_device *csid_dev = NULL;
+	struct v4l2_subdev *subdev_csids[MAX_CSID_NUM] = {NULL};
+	msm_sd_get_subdevs(subdev_csids,MAX_CSID_NUM,"msm_csid");
+
+	//back camera use csid0, front camera use csid1
+	for(i = 0; i<MAX_CSID_NUM; i++)
+	{
+		if (!subdev_csids[i] || !(subdev_csids[i]->dev_priv))
+		{
+			pr_err("%s: csid_dev[%d] is NULL \n",__func__,i);
+			continue;
+		}
+		csid_dev = subdev_csids[i]->dev_priv;
+
+		//back camera use csid0, front camera use csid1
+		if (csid_dev->csid_state == CSID_POWER_UP && csid_dev->csid_read_mipi_pkg)
+		{
+			csid_pkg = csid_dev->csid_read_mipi_pkg(csid_dev);
+			pr_info("%s: csid[%d] read_times[%d] total mipi package = %u\n",__func__,
+				csid_dev->pdev->id, read_time,csid_pkg);
+			continue;
+		}
+	}
+}
+

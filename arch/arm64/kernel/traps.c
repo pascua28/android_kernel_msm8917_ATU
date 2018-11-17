@@ -43,7 +43,9 @@
 #include <asm/edac.h>
 
 #include <trace/events/exception.h>
-
+#ifdef CONFIG_FASTBOOT_DUMP
+#include <linux/fastboot_dump_reason_api.h>
+#endif
 static const char *handler[]= {
 	"Synchronous Abort",
 	"IRQ",
@@ -292,6 +294,9 @@ void arm64_notify_die(const char *str, struct pt_regs *regs,
 		current->thread.fault_code = err;
 		force_sig_info(info->si_signo, info, current);
 	} else {
+#ifdef CONFIG_FASTBOOT_DUMP
+		fastboot_dump_s_reason_str_set(str);
+#endif
 		die(str, regs, err);
 	}
 }
@@ -391,7 +396,9 @@ asmlinkage void __exception do_undefinstr(struct pt_regs *regs)
 			current->comm, task_pid_nr(current), pc);
 		dump_instr(KERN_INFO, regs);
 	}
-
+#ifdef CONFIG_FASTBOOT_DUMP
+	fastboot_dump_s_reason_set(FD_S_APANIC_UNDEF_CMD);
+#endif
 	info.si_signo = SIGILL;
 	info.si_errno = 0;
 	info.si_code  = ILL_ILLOPC;
@@ -545,6 +552,10 @@ asmlinkage void bad_el0_sync(struct pt_regs *regs, int reason, unsigned int esr)
 
 	pr_crit("Bad mode in %s handler detected, code 0x%08x -- %s\n",
 		handler[reason], esr, esr_get_class_string(esr));
+#ifdef CONFIG_FASTBOOT_DUMP
+	fastboot_dump_s_reason_set(FD_S_APANIC_BAD_MODE);
+	fastboot_dump_s_reason_str_set_format("Bad_mode_%s",handler[reason]);
+#endif
 	__show_regs(regs);
 
 	info.si_signo = SIGILL;

@@ -46,6 +46,9 @@ struct msm_camera_slave_info {
 	uint16_t sensor_id_reg_addr;
 	uint16_t sensor_id;
 	uint16_t sensor_id_mask;
+	struct dump_reg_info_t *dump_reg_info;
+	unsigned short dump_reg_num;
+	msm_module_id_info_t module_id_info;
 };
 
 struct msm_cam_clk_info {

@@ -16,6 +16,10 @@
 #include <asm/pgtable.h>
 #include "internal.h"
 
+#ifdef CONFIG_HUAWEI_UNMOVABLE_ISOLATE
+#include <linux/unmovable_isolate.h>
+#endif
+
 void __attribute__((weak)) arch_report_meminfo(struct seq_file *m)
 {
 }
@@ -32,7 +36,6 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 	unsigned long pages[NR_LRU_LISTS];
 	struct zone *zone;
 	int lru;
-
 /*
  * display in kilobytes.
  */
@@ -138,6 +141,10 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
 		"AnonHugePages:  %8lu kB\n"
 #endif
+#ifdef CONFIG_HUAWEI_UNMOVABLE_ISOLATE
+		"Isolate1Free:   %8lu kB\n"
+		"Isolate2Free:   %8lu kB\n"
+#endif
 		,
 		K(i.totalram),
 		K(i.freeram),
@@ -192,6 +199,10 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
 		,K(global_page_state(NR_ANON_TRANSPARENT_HUGEPAGES) *
 		   HPAGE_PMD_NR)
+#endif
+#ifdef CONFIG_HUAWEI_UNMOVABLE_ISOLATE
+		, K(global_page_state(NR_FREE_UNMOVABLE_ISOLATE1_PAGES))
+		, K(global_page_state(NR_FREE_UNMOVABLE_ISOLATE2_PAGES))
 #endif
 		);
 

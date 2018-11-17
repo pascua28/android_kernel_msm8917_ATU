@@ -42,7 +42,37 @@
 
 #include <trace/events/exception.h>
 
+#ifdef CONFIG_FASTBOOT_DUMP
+#include <linux/fastboot_dump_reason_api.h>
+#endif
+
+#ifdef CONFIG_HUAWEI_BOOST_SIGKILL_FREE
+#include <linux/boost_sigkill_free.h>
+#endif
+
 static const char *fault_name(unsigned int esr);
+
+#ifdef CONFIG_KPROBES
+static inline int notify_page_fault(struct pt_regs *regs, unsigned int esr)
+{
+        int ret = 0;
+
+        /* kprobe_running() needs smp_processor_id() */
+        if (!user_mode(regs)) {
+                preempt_disable();
+                if (kprobe_running() && kprobe_fault_handler(regs, esr))
+                        ret = 1;
+                preempt_enable();
+        }
+
+        return ret;
+}
+#else
+static inline int notify_page_fault(struct pt_regs *regs, unsigned int esr)
+{
+        return 0;
+}
+#endif
 
 /*
  * Dump out the page tables associated with 'addr' in mm 'mm'.
@@ -109,7 +139,19 @@ static void __do_kernel_fault(struct mm_struct *mm, unsigned long addr,
 	pr_alert("Unable to handle kernel %s at virtual address %08lx\n",
 		 (addr < PAGE_SIZE) ? "NULL pointer dereference" :
 		 "paging request", addr);
-
+#ifdef CONFIG_FASTBOOT_DUMP
+	fastboot_dump_m_reason_set(FD_M_APANIC);
+	if(addr < PAGE_SIZE)
+	{
+		fastboot_dump_s_reason_set(FD_S_APANIC_NULL_POINTER);
+		fastboot_dump_s_reason_str_set("Null_pointer");
+	}
+	else
+	{
+		fastboot_dump_s_reason_set(FD_S_APANIC_PAGING_REQUEST);
+		fastboot_dump_s_reason_str_set("Paging_request_fail");
+	}
+#endif
 	show_pte(mm, addr);
 	die("Oops", regs, esr);
 	bust_spinlocks(0);
@@ -171,6 +213,15 @@ static int __do_page_fault(struct mm_struct *mm, unsigned long addr,
 	struct vm_area_struct *vma;
 	int fault;
 
+#ifdef CONFIG_HUAWEI_BOOST_SIGKILL_FREE
+	if (unlikely(test_bit(MMF_FAST_FREEING, &mm->flags))) {
+		task_clear_jobctl_pending(tsk, JOBCTL_PENDING_MASK);
+		sigaddset(&tsk->pending.signal, SIGKILL);
+		set_tsk_thread_flag(tsk, TIF_SIGPENDING);
+		return VM_FAULT_BADMAP;
+	}
+#endif
+
 	vma = find_vma(mm, addr);
 	fault = VM_FAULT_BADMAP;
 	if (unlikely(!vma))
@@ -230,6 +281,9 @@ static int __kprobes do_page_fault(unsigned long addr, unsigned int esr,
 	int fault, sig, code;
 	unsigned long vm_flags = VM_READ | VM_WRITE | VM_EXEC;
 	unsigned int mm_flags = FAULT_FLAG_ALLOW_RETRY | FAULT_FLAG_KILLABLE;
+
+	if (notify_page_fault(regs, esr))
+		return 0;
 
 	tsk = current;
 	mm  = tsk->mm;
@@ -507,7 +561,10 @@ asmlinkage void __exception do_mem_abort(unsigned long addr, unsigned int esr,
 
 	pr_alert("Unhandled fault: %s (0x%08x) at 0x%016lx\n",
 		 inf->name, esr, addr);
-
+#ifdef CONFIG_FASTBOOT_DUMP
+	fastboot_dump_s_reason_set(FD_S_APANIC_UNHANDLE_FAULT);
+	fastboot_dump_s_reason_str_set_format("Unhandled_fault_%s",inf->name);
+#endif
 	info.si_signo = inf->sig;
 	info.si_errno = 0;
 	info.si_code  = inf->code;

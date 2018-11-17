@@ -510,4 +510,17 @@ config DM_LOG_WRITES
 	  be called dm-log-writes.
 
 	  If unsure, say N.
+
+config HUAWEI_MSM8937_DM_VERITY_DEBUG
+	tristate "Huawei msm8937 dm-verity debug support"
+	default n
+	---help---
+	  Say Y to enable more log print for dm-verity issues debug.
+	  If fec fail, the current block data(4k bytes) will be printed into dmesg-log
+	  and the device will dump.
+
+	  To compile this code as a module, choose M here: the module will
+	  be called huawei-msm8937-dm-verity-debug.
+
+	  If unsure, say N.
 endif # MD

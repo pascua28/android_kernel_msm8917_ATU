@@ -28,6 +28,13 @@
 
 struct msm_vfe_cfg_cmd_list;
 
+struct isp_proc {
+	uint32_t  kernel_sofid;
+	uint32_t  vfeid;
+	uint32_t  drop_reconfig;
+};
+
+
 enum ISP_START_PIXEL_PATTERN {
 	ISP_BAYER_RGRGRG,
 	ISP_BAYER_GRGRGR,
@@ -815,7 +822,10 @@ struct msm_isp_output_info {
 	uint16_t stats_framedrop_mask;
 	/* delta between master and slave */
 };
-
+/* This structure is piggybacked with reg update event */
+struct msm_isp_reg_update_info {
+	uint8_t dev_idx;
+};
 /* This structure is piggybacked with SOF event */
 struct msm_isp_sof_info {
 	uint8_t regs_not_updated;
@@ -827,6 +837,7 @@ struct msm_isp_sof_info {
 	uint16_t stats_get_buf_fail_mask;
 	/* delta between master and slave */
 	struct msm_isp_ms_delta_info ms_delta_info;
+	uint8_t dev_idx;
 	/*
 	 * mask with AXI_SRC in paused state. In PAUSED
 	 * state there is no Buffer output. So this mask is used
@@ -863,6 +874,8 @@ struct msm_isp_event_data {
 		struct msm_isp_output_info output_info;
 		/* Sent for SOF event */
 		struct msm_isp_sof_info sof_info;
+		/* send for reg update */
+		struct msm_isp_reg_update_info reg_update_info;
 	} u; /* union can have max 52 bytes */
 };
 

@@ -120,9 +120,9 @@ enum msm_usb_phy_type {
 	QUSB_ULPI_PHY,
 };
 
-#define IDEV_CHG_MAX	1500
+#define IDEV_CHG_MAX	2000
 #define IUNIT		100
-#define IDEV_HVDCP_CHG_MAX	1800
+#define IDEV_HVDCP_CHG_MAX	2000
 
 /**
  * Different states involved in USB charger detection.
@@ -169,6 +169,7 @@ enum usb_chg_type {
 	USB_CDP_CHARGER,
 	USB_PROPRIETARY_CHARGER,
 	USB_FLOATED_CHARGER,
+	USB_UNSUPPORTED_CHARGER,
 };
 
 /**
@@ -221,6 +222,21 @@ enum usb_ctrl {
 enum usb_id_state {
 	USB_ID_GROUND = 0,
 	USB_ID_FLOAT,
+};
+
+/**
+ * Used for different states involved in Floating charger detection.
+ *
+ * FLOATING_AS_SDP		This is used to detect floating charger as SDP
+ * FLOATING_AS_DCP		This is used to detect floating charger as DCP
+ * FLOATING_AS_INVALID		This is used to detect floating charger is not
+ *				supported and detects as INVALID
+ *
+ */
+enum floated_chg_type {
+	FLOATING_AS_SDP = 0,
+	FLOATING_AS_DCP,
+	FLOATING_AS_INVALID,
 };
 
 /**
@@ -289,6 +305,7 @@ enum usb_id_state {
  */
 struct msm_otg_platform_data {
 	int *phy_init_seq;
+	int *phy_init_seq_host;
 	int phy_init_sz;
 	int (*vbus_power)(bool on);
 	unsigned power_budget;
@@ -328,6 +345,7 @@ struct msm_otg_platform_data {
 	bool emulation;
 	bool enable_streaming;
 	bool enable_axi_prefetch;
+	enum floated_chg_type enable_floated_charger;
 	bool enable_sdp_typec_current_limit;
 	bool vbus_low_as_hostmode;
 };
@@ -541,11 +559,13 @@ struct msm_otg {
 	struct completion ext_chg_wait;
 	struct pinctrl *phy_pinctrl;
 	bool is_ext_chg_dcp;
+	bool is_ext_chg_detected;
 	struct qpnp_vadc_chip	*vadc_dev;
 	int ext_id_irq;
 	bool phy_irq_pending;
 	enum usb_id_state id_state;
 	bool rm_pulldown;
+#ifndef CONFIG_FINAL_RELEASE
 /* Maximum debug message length */
 #define DEBUG_MSG_LEN   128UL
 /* Maximum number of messages */
@@ -554,11 +574,13 @@ struct msm_otg {
 	rwlock_t dbg_lock;
 
 	char (buf[DEBUG_MAX_MSG])[DEBUG_MSG_LEN];   /* buffer */
+#endif
 	unsigned int vbus_state;
 	unsigned int usb_irq_count;
 	int pm_qos_latency;
 	struct pm_qos_request pm_qos_req_dma;
 	struct delayed_work perf_vote_work;
+	unsigned int rerun_bc12_cnt;
 };
 
 struct ci13xxx_platform_data {
@@ -695,6 +717,7 @@ int msm_data_fifo_config(struct usb_ep *ep, phys_addr_t addr, u32 size,
 	u8 dst_pipe_idx);
 bool msm_dwc3_reset_ep_after_lpm(struct usb_gadget *gadget);
 int msm_dwc3_reset_dbm_ep(struct usb_ep *ep);
+int qusb_phy_run_dcd(struct usb_phy *phy);
 
 #else
 static inline int msm_data_fifo_config(struct usb_ep *ep, phys_addr_t addr,

@@ -17,6 +17,7 @@
 #include "camera.h"
 #include "msm_cci.h"
 #include "msm_camera_dt_util.h"
+#include "misc/app_info.h"
 
 /* Logging macro */
 #undef CDBG
@@ -677,6 +678,44 @@ static void msm_sensor_fill_sensor_info(struct msm_sensor_ctrl_t *s_ctrl,
 	strlcpy(entity_name, s_ctrl->msm_sd.sd.entity.name, MAX_SENSOR_NAME);
 }
 
+static void msm_sensor_get_dumpinfo(struct msm_camera_sensor_slave_info* slave_info, struct msm_camera_slave_info* camera_info)
+{
+	struct dump_reg_info_t *dump_reg_info = NULL;
+
+	if (!camera_info){
+		return;
+	}
+
+	camera_info->dump_reg_num = 0;
+	camera_info->dump_reg_info = NULL;
+
+	if (!slave_info) {
+		return;
+	}
+
+	if (0 == slave_info->dump_reg_num || !slave_info->dump_reg_info) {
+		pr_err("%s: sensor_name: %s, dump_reg_num:%d,  dump_reg_info: %pK (non fatal)\n",  __func__,
+			slave_info->sensor_name,
+			slave_info->dump_reg_num,
+			slave_info->dump_reg_info);
+		return;
+	}
+
+	dump_reg_info = kzalloc(sizeof(struct dump_reg_info_t) * (slave_info->dump_reg_num), GFP_KERNEL);
+	if (dump_reg_info) {
+		if (copy_from_user(dump_reg_info, slave_info->dump_reg_info,
+			sizeof(struct dump_reg_info_t) * (slave_info->dump_reg_num))) {
+			kfree(dump_reg_info);
+			pr_err("%s: copy dump_reg_info from user failed(non fatal)\n", slave_info->sensor_name);
+		} else {
+			camera_info->dump_reg_num = slave_info->dump_reg_num;
+			camera_info->dump_reg_info = dump_reg_info;
+		}
+	} else {
+		pr_err("%s: create dump_reg_info memory failed(non fatal)\n", slave_info->sensor_name);
+	}
+}
+
 /* static function definition */
 int32_t msm_sensor_driver_probe(void *setting,
 	struct msm_sensor_info_t *probed_info, char *entity_name)
@@ -758,6 +797,11 @@ int32_t msm_sensor_driver_probe(void *setting,
 			slave_info32->output_format;
 		slave_info->bypass_video_node_creation =
 			!!slave_info32->bypass_video_node_creation;
+		slave_info->dump_reg_info = compat_ptr(slave_info32->dump_reg_info);
+		slave_info->dump_reg_num = slave_info32->dump_reg_num;
+
+		slave_info->module_id_info = slave_info32->module_id_info;
+
 		kfree(slave_info32);
 	} else
 #endif
@@ -873,6 +917,20 @@ int32_t msm_sensor_driver_probe(void *setting,
 		slave_info->sensor_id_info.sensor_id_reg_addr;
 	camera_info->sensor_id = slave_info->sensor_id_info.sensor_id;
 	camera_info->sensor_id_mask = slave_info->sensor_id_info.sensor_id_mask;
+
+	camera_info->module_id_info = slave_info->module_id_info;
+
+	CDBG("msm_sensor_driver_probe:  slave_info->module_id_info.module_id=%d,i2c_addr:0x%x, reg_addr_type:%d, reg:0x%x, data_type:%d, id:0x%x, mask:0x%x,flag=%d",
+		slave_info->module_id_info.module_id,
+		slave_info->module_id_info.vendor_id_i2c_addr,
+		slave_info->module_id_info.vendor_id_reg_addr_type,
+		slave_info->module_id_info.vendor_id_reg_addr,
+		slave_info->module_id_info.vendor_id_data_type,
+		slave_info->module_id_info.vendor_id,
+		slave_info->module_id_info.vendor_id_mask,
+		slave_info->module_id_info.vendor_id_support);
+
+	msm_sensor_get_dumpinfo(slave_info, camera_info);
 
 	/* Fill CCI master, slave address and CCI default params */
 	if (!s_ctrl->sensor_i2c_client) {
@@ -1033,6 +1091,9 @@ CSID_TG:
 camera_power_down:
 	s_ctrl->func_tbl->sensor_power_down(s_ctrl);
 free_camera_info:
+	if (camera_info) {
+		kfree(camera_info->dump_reg_info);
+	}
 	kfree(camera_info);
 free_slave_info:
 	kfree(slave_info);
@@ -1156,6 +1217,9 @@ static int32_t msm_sensor_driver_get_dt_data(struct msm_sensor_ctrl_t *s_ctrl)
 
 	CDBG("%s qcom,mclk-23880000 = %d\n", __func__,
 		s_ctrl->set_mclk_23880000);
+	s_ctrl->product_name = NULL;
+	of_property_read_string(of_node, "qcom,product-name",&s_ctrl->product_name);
+	pr_info("%s product_name = %s\n", __func__, s_ctrl->product_name);
 
 	return rc;
 
@@ -1280,6 +1344,9 @@ static int32_t msm_sensor_driver_platform_probe(struct platform_device *pdev)
 	return rc;
 FREE_S_CTRL:
 	kfree(s_ctrl);
+
+	/* optimize camera print mipi packet and frame count log*/
+	s_ctrl = NULL;
 	return rc;
 }
 
@@ -1393,7 +1460,79 @@ static void __exit msm_sensor_driver_exit(void)
 	i2c_del_driver(&msm_sensor_driver_i2c);
 	return;
 }
+int32_t msm_get_sensor_product_name(void *setting)
+{
+	int32_t i = 0, rc = -1;
+	struct msm_sensor_ctrl_t *s_ctrl = NULL;
+	struct msm_support_product_name_info product_name_info;
 
+	if(!setting) {
+		return rc;
+	}
+
+	memset(&product_name_info, 0, sizeof(product_name_info));
+
+	for(i = 0; i < MAX_SUPPORT_SENSOR_COUNT; ++i) {
+		s_ctrl = g_sctrl[i];
+
+		if(!s_ctrl) {
+			continue;
+		}
+		if(!s_ctrl->product_name) {
+			pr_err("the %d camera product name is null\n",i);
+			continue;
+		}
+
+		strlcpy(product_name_info.product_name_info[i], s_ctrl->product_name, APP_INFO_MAX_LINE_LEN);
+		pr_info("the %d camera product name is: %s \n", i, product_name_info.product_name_info[i]);
+		rc = 0;
+	}
+	copy_to_user(setting, &product_name_info, sizeof(struct msm_support_product_name_info));
+	return rc;
+}
+int32_t msm_set_sensor_info_name(void *setting){
+	int32_t rc = 0;
+	int8_t i = 0, size = 0;
+	/*judge if app_info has been written*/
+	static bool app_info_done = false;
+	struct hw_camera_app_info_array_t  *app_info=NULL;
+	pr_info("%s ENTER.",__func__);
+
+	if(app_info_done){
+		pr_info("app_info has been written\n");
+		return rc;
+	}
+
+	if (!setting) {
+		pr_err("failed: hw_sensor_info %pK", setting);
+		return -EINVAL;
+	}
+
+	app_info = kzalloc(sizeof(struct hw_camera_app_info_array_t), GFP_KERNEL);
+	if (!app_info) {
+		pr_err("failed: kzalloc failed");
+		return -ENOMEM;
+	}
+
+	if (copy_from_user((void *)app_info, setting,sizeof(struct hw_camera_app_info_array_t))) {
+		pr_err("failed: copy_from_user\n");
+		rc = -EFAULT;
+		goto EXIT;
+	}
+
+	for(i=0; i< HW_MAX_CAMERA; i++) {
+		rc = app_info_set(app_info->app_info[i].label, app_info->app_info[i].camera_name);
+		if (rc < 0) {
+			pr_err("set sensor %s fail\n",app_info->app_info[i].camera_name);
+			break;
+		}
+	}
+	app_info_done = true;
+EXIT:
+	kfree(app_info);
+	pr_info("%s  EXIT.",__func__);
+	return rc;
+}
 module_init(msm_sensor_driver_init);
 module_exit(msm_sensor_driver_exit);
 MODULE_DESCRIPTION("msm_sensor_driver");

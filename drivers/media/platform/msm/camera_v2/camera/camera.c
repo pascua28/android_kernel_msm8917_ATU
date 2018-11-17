@@ -31,6 +31,9 @@
 #include "camera.h"
 #include "msm.h"
 #include "msm_vb2.h"
+#ifdef CONFIG_HUAWEI_DSM
+#include "msm_camera_dsm.h"
+#endif
 
 #define fh_to_private(__fh) \
 	container_of(__fh, struct camera_v4l2_private, fh)
@@ -750,6 +753,10 @@ static int camera_v4l2_close(struct file *filep)
 	mask = (1 << sp->stream_id);
 	opn_idx &= ~mask;
 	atomic_set(&pvdev->opened, opn_idx);
+
+#ifdef CONFIG_HUAWEI_DSM
+	camera_is_closing = 1;
+#endif
 
 	if (msm_is_daemon_present() != false && sp->stream_created == true) {
 		pr_debug("%s: close stream_id=%d\n", __func__, sp->stream_id);

@@ -50,6 +50,12 @@
 #include <linux/uaccess.h>
 #include <linux/uio_driver.h>
 #include <linux/msm-bus.h>
+#ifdef CONFIG_FASTBOOT_DUMP
+#include <linux/fastboot_dump_reason_api.h>
+#endif
+#ifdef CONFIG_HUAWEI_RESET_DETECT
+#include <linux/huawei_reset_detect.h>
+#endif
 
 #define CREATE_TRACE_POINTS
 #define TRACE_MSM_THERMAL
@@ -2719,6 +2725,15 @@ static void msm_thermal_bite(int zone_id, long temp)
 	} else {
 		pr_err("Tsens:%d reached temperature:%ld. System reset\n",
 			tsens_id, temp);
+
+#ifdef CONFIG_HUAWEI_RESET_DETECT
+		set_reset_magic(RESET_MAGIC_THERMAL);
+#endif
+#ifdef CONFIG_FASTBOOT_DUMP
+		fastboot_dump_m_reason_set(FD_M_APANIC);
+		fastboot_dump_s_reason_set(FD_S_APANIC_THERMAL);
+		fastboot_dump_s_reason_str_set("Thermal_Err");
+#endif
 	}
 	if (!is_scm_armv8()) {
 		scm_call_atomic1(SCM_SVC_BOOT, THERM_SECURE_BITE_CMD, 0);

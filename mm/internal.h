@@ -411,4 +411,7 @@ unsigned long reclaim_clean_pages_from_list(struct zone *zone,
 #define ALLOC_CMA		0x80 /* allow allocations from CMA areas */
 #define ALLOC_FAIR		0x100 /* fair zone allocation */
 
+#ifdef CONFIG_HUAWEI_UNMOVABLE_ISOLATE
+#define ALLOC_UNMOVABLE		0x800 /* migratetype is MIGRATE_UNMOVABLE */
+#endif
 #endif	/* __MM_INTERNAL_H */

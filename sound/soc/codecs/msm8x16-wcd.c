@@ -44,6 +44,10 @@
 #include "wcd-mbhc-v2.h"
 #include "msm8916-wcd-irq.h"
 #include "msm8x16_wcd_registers.h"
+#ifdef CONFIG_HUAWEI_DSM_AUDIO
+#include <dsm_audio/dsm_audio.h>
+#define DSM_REPORT_DELAY_TIME  (40)
+#endif
 
 #define MSM8X16_WCD_RATES (SNDRV_PCM_RATE_8000 | SNDRV_PCM_RATE_16000 |\
 			SNDRV_PCM_RATE_32000 | SNDRV_PCM_RATE_48000)
@@ -313,7 +317,9 @@ struct msm8x16_wcd_spmi msm8x16_wcd_modules[MAX_MSM8X16_WCD_DEVICE];
 static void *adsp_state_notifier;
 
 static struct snd_soc_codec *registered_codec;
-
+#ifdef CONFIG_HW_AUDIO_INFO
+extern void hw_get_registered_codec(struct snd_soc_codec *codec);
+#endif
 static int get_codec_version(struct msm8x16_wcd_priv *msm8x16_wcd)
 {
 	if (msm8x16_wcd->codec_version == DIANGU)
@@ -2271,6 +2277,65 @@ static int msm8x16_wcd_ext_spk_boost_set(struct snd_kcontrol *kcontrol,
 		__func__, msm8x16_wcd->spk_boost_set);
 	return 0;
 }
+
+/* here set TX3_INT_PULLUP_EN to TX2N_TO_GND or TX2N_TO_MBIAS mode, to adapt hardware design */
+static int msm8x16_wcd_tx3_int_pull_en_mode_get(struct snd_kcontrol *kcontrol,
+				struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_codec *codec = snd_soc_kcontrol_codec(kcontrol);
+
+	if (codec == NULL) {
+		pr_err("%s : input prt NULL.\n", __func__);
+		return -EINVAL;
+	}
+
+	/* bit1 = 1 means TX2N_TO_MBIAS */
+	if (0x01 & snd_soc_read(codec, MSM8X16_WCD_A_ANALOG_MICB_1_INT_RBIAS)) {
+		ucontrol->value.integer.value[0] = 1;
+	} else {
+		ucontrol->value.integer.value[0] = 0;
+	}
+
+	dev_dbg(codec->dev, "%s: tx3_int_pull_en = %d\n", __func__,
+		ucontrol->value.integer.value[0]);
+	return 0;
+}
+
+static int msm8x16_wcd_tx3_int_pull_en_mode_set(struct snd_kcontrol *kcontrol,
+				struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_codec *codec = snd_soc_kcontrol_codec(kcontrol);
+
+	if (codec == NULL) {
+		pr_err("%s : input prt NULL.\n", __func__);
+		return -EINVAL;
+	}
+
+	dev_dbg(codec->dev, "%s: ucontrol->value.integer.value[0] = %d\n",
+		__func__, ucontrol->value.integer.value[0]);
+
+	/* bit1 = 0 means TX2N_TO_GND, bit1 default value is 1, means TX2N_TO_MBIAS */
+	switch (ucontrol->value.integer.value[0]) {
+	case 0:
+		snd_soc_update_bits(codec,
+			MSM8X16_WCD_A_ANALOG_MICB_1_INT_RBIAS,
+			0x01, 0x00);
+		break;
+	case 1:
+		snd_soc_update_bits(codec,
+			MSM8X16_WCD_A_ANALOG_MICB_1_INT_RBIAS,
+			0x01, 0x01);
+		break;
+	default:
+		snd_soc_update_bits(codec,
+			MSM8X16_WCD_A_ANALOG_MICB_1_INT_RBIAS,
+			0x01, 0x01);
+		break;
+	}
+
+	return 0;
+}
+
 static int msm8x16_wcd_get_iir_enable_audio_mixer(
 					struct snd_kcontrol *kcontrol,
 					struct snd_ctl_elem_value *ucontrol)
@@ -2554,6 +2619,12 @@ static const struct soc_enum msm8x16_wcd_ext_spk_boost_ctl_enum[] = {
 		SOC_ENUM_SINGLE_EXT(2, msm8x16_wcd_ext_spk_boost_ctrl_text),
 };
 
+static const char * const msm8x16_wcd_tx3_int_pull_en_ctrl_text[] = {
+		"TX2N_TO_GND", "TX2N_TO_MBIAS"};
+static const struct soc_enum msm8x16_wcd_tx3_int_pull_en_ctl_enum[] = {
+		SOC_ENUM_SINGLE_EXT(2, msm8x16_wcd_tx3_int_pull_en_ctrl_text),
+};
+
 static const char * const msm8x16_wcd_hph_mode_ctrl_text[] = {
 		"NORMAL", "HD2"};
 static const struct soc_enum msm8x16_wcd_hph_mode_ctl_enum[] = {
@@ -2600,6 +2671,9 @@ static const struct snd_kcontrol_new msm8x16_wcd_snd_controls[] = {
 
 	SOC_ENUM_EXT("Ext Spk Boost", msm8x16_wcd_ext_spk_boost_ctl_enum[0],
 		msm8x16_wcd_ext_spk_boost_get, msm8x16_wcd_ext_spk_boost_set),
+
+	SOC_ENUM_EXT("TX3 INT PULLUP EN", msm8x16_wcd_tx3_int_pull_en_ctl_enum[0],
+		msm8x16_wcd_tx3_int_pull_en_mode_get, msm8x16_wcd_tx3_int_pull_en_mode_set),
 
 	SOC_ENUM_EXT("LOOPBACK Mode", msm8x16_wcd_loopback_mode_ctl_enum[0],
 		msm8x16_wcd_loopback_mode_get, msm8x16_wcd_loopback_mode_put),
@@ -4237,6 +4311,7 @@ static int msm8x16_wcd_lo_dac_event(struct snd_soc_dapm_widget *w,
 			MSM8X16_WCD_A_ANALOG_RX_LO_DAC_CTL, 0x08, 0x08);
 		snd_soc_update_bits(codec,
 			MSM8X16_WCD_A_ANALOG_RX_LO_DAC_CTL, 0x40, 0x40);
+		msleep(5);
 		break;
 	case SND_SOC_DAPM_POST_PMU:
 		snd_soc_update_bits(codec,
@@ -4438,6 +4513,7 @@ static const struct snd_soc_dapm_route audio_map[] = {
 	{"Ext Spk", NULL, "Ext Spk Switch"},
 	{"Ext Spk Switch", "On", "HPHL PA"},
 	{"Ext Spk Switch", "On", "HPHR PA"},
+	{"Ext Spk Switch", "On", "LINEOUT"},
 
 	{"HPHL PA", NULL, "HPHL"},
 	{"HPHR PA", NULL, "HPHR"},
@@ -5642,6 +5718,9 @@ static int adsp_state_callback(struct notifier_block *nb, unsigned long value,
 	bool timedout;
 	unsigned long timeout;
 
+#ifdef CONFIG_HUAWEI_DSM_AUDIO
+	audio_dsm_report_info(AUDIO_CODEC, DSM_AUDIO_MODEM_CRASH_CODEC_CALLBACK, "dsm audio mesg: adsp callback");
+#endif
 	if (value == SUBSYS_BEFORE_SHUTDOWN)
 		msm8x16_wcd_device_down(registered_codec);
 	else if (value == SUBSYS_AFTER_POWERUP) {
@@ -5774,9 +5853,12 @@ static int msm8x16_wcd_codec_probe(struct snd_soc_codec *codec)
 	dev_dbg(codec->dev, "%s()\n", __func__);
 
 	msm8x16_wcd_priv = kzalloc(sizeof(struct msm8x16_wcd_priv), GFP_KERNEL);
-	if (!msm8x16_wcd_priv)
+	if (!msm8x16_wcd_priv){
+#ifdef CONFIG_HUAWEI_DSM_AUDIO
+		audio_dsm_report_info(AUDIO_CODEC, DSM_AUDIO_CARD_LOAD_FAIL_ERROR_NO,"dsm audio mesg: kzalloc mem fail");
+#endif
 		return -ENOMEM;
-
+	}
 	for (i = 0; i < NUM_DECIMATORS; i++) {
 		tx_hpf_work[i].msm8x16_wcd = msm8x16_wcd_priv;
 		tx_hpf_work[i].decimator = i + 1;
@@ -5794,6 +5876,9 @@ static int msm8x16_wcd_codec_probe(struct snd_soc_codec *codec)
 	msm8x16_wcd->dig_base = ioremap(pdata->dig_cdc_addr,
 			MSM8X16_DIGITAL_CODEC_REG_SIZE);
 	if (msm8x16_wcd->dig_base == NULL) {
+#ifdef CONFIG_HUAWEI_DSM_AUDIO
+		audio_dsm_report_info(AUDIO_CODEC, DSM_AUDIO_CARD_LOAD_FAIL_ERROR_NO,"dsm audio mesg: ioremap fail");
+#endif
 		dev_err(codec->dev, "%s ioremap failed\n", __func__);
 		kfree(msm8x16_wcd_priv);
 		return -ENOMEM;
@@ -5913,6 +5998,9 @@ static int msm8x16_wcd_codec_probe(struct snd_soc_codec *codec)
 			&adsp_state_notifier_block);
 	}
 	if (!adsp_state_notifier) {
+#ifdef CONFIG_HUAWEI_DSM_AUDIO
+		audio_dsm_report_info(AUDIO_CODEC, DSM_AUDIO_CARD_LOAD_FAIL_ERROR_NO,"dsm audio mesg: adsp regist fail");
+#endif
 		dev_err(codec->dev, "Failed to register adsp state notifier\n");
 		iounmap(msm8x16_wcd->dig_base);
 		kfree(msm8x16_wcd_priv->fw_data);
@@ -5920,6 +6008,9 @@ static int msm8x16_wcd_codec_probe(struct snd_soc_codec *codec)
 		registered_codec = NULL;
 		return -ENOMEM;
 	}
+#ifdef CONFIG_HW_AUDIO_INFO
+	hw_get_registered_codec(registered_codec);
+#endif
 	return 0;
 }
 
@@ -6199,12 +6290,21 @@ static int msm8x16_wcd_spmi_probe(struct spmi_device *spmi)
 	struct resource *wcd_resource;
 	int adsp_state;
 	static int spmi_dev_registered_cnt;
+#ifdef CONFIG_HUAWEI_DSM_AUDIO
+	struct timespec ts = {0, 0};
+#endif
 
 	dev_dbg(&spmi->dev, "%s(%d):slave ID = 0x%x\n",
 		__func__, __LINE__,  spmi->sid);
 
 	adsp_state = apr_get_subsys_state();
 	if (adsp_state != APR_SUBSYS_LOADED) {
+#ifdef CONFIG_HUAWEI_DSM_AUDIO
+	get_monotonic_boottime(&ts);
+	if (ts.tv_sec >= DSM_REPORT_DELAY_TIME) {
+		audio_dsm_report_info(AUDIO_CODEC, DSM_AUDIO_ADSP_SETUP_FAIL_ERROR_NO, "dsm audio mesg: adsp subsys load fail");
+	}
+#endif
 		dev_dbg(&spmi->dev, "Adsp is not loaded yet %d\n",
 				adsp_state);
 		return -EPROBE_DEFER;
@@ -6212,6 +6312,9 @@ static int msm8x16_wcd_spmi_probe(struct spmi_device *spmi)
 
 	wcd_resource = spmi_get_resource(spmi, NULL, IORESOURCE_MEM, 0);
 	if (!wcd_resource) {
+#ifdef CONFIG_HUAWEI_DSM_AUDIO
+		audio_dsm_report_info(AUDIO_CODEC, DSM_AUDIO_CARD_LOAD_FAIL_ERROR_NO, "dsm audio mesg: spmi get fail");
+#endif
 		dev_err(&spmi->dev, "Unable to get Tombak base address\n");
 		return -ENXIO;
 	}
@@ -6322,6 +6425,15 @@ err_supplies:
 err_codec:
 	kfree(msm8x16);
 rtn:
+#ifdef CONFIG_HUAWEI_DSM_AUDIO
+	if (-EPROBE_DEFER != ret) {
+		get_monotonic_boottime(&ts);
+		if (ts.tv_sec >= DSM_REPORT_DELAY_TIME) {
+			audio_dsm_report_info(AUDIO_CODEC, DSM_AUDIO_CARD_LOAD_FAIL_ERROR_NO,
+				"%s ret = %d, time = %d", __func__, ret, ts.tv_sec);
+		}
+	}
+#endif
 	return ret;
 }
 

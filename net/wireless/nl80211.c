@@ -26,6 +26,10 @@
 #include "reg.h"
 #include "rdev-ops.h"
 
+#ifndef CONFIG_HW_GET_EXT_SIG
+#define CONFIG_HW_GET_EXT_SIG
+#endif
+
 static int nl80211_crypto_settings(struct cfg80211_registered_device *rdev,
 				   struct genl_info *info,
 				   struct cfg80211_crypto_settings *settings,
@@ -4164,6 +4168,26 @@ static int nl80211_send_station(struct sk_buff *msg, u32 portid, u32 seq,
 		    sinfo->assoc_req_ies))
 		goto nla_put_failure;
 
+#ifdef CONFIG_HW_GET_EXT_SIG
+	if ((sinfo->filled & BIT(NL80211_STA_INFO_NOISE))) {
+		if (nla_put_s32(msg, NL80211_STA_INFO_NOISE, sinfo->noise)) {
+			goto nla_put_failure;
+		}
+	}
+
+	if ((sinfo->filled & BIT(NL80211_STA_INFO_SNR))) {
+		if (nla_put_s32(msg, NL80211_STA_INFO_SNR, sinfo->snr)) {
+			goto nla_put_failure;
+		}
+	}
+
+	if ((sinfo->filled & BIT(NL80211_STA_INFO_CNAHLOAD))) {
+		if (nla_put_s32(msg, NL80211_STA_INFO_CNAHLOAD, sinfo->chload)) {
+			goto nla_put_failure;
+		}
+	}
+#endif
+
 	return genlmsg_end(msg, hdr);
 
  nla_put_failure:
@@ -7006,8 +7030,12 @@ static int nl80211_dump_scan(struct sk_buff *skb, struct netlink_callback *cb)
 	int err;
 
 	err = nl80211_prepare_wdev_dump(skb, cb, &rdev, &wdev);
-	if (err)
+	if (err){
+		pr_err("%s fail  %d\n",__FUNCTION__,err);
 		return err;
+	}
+
+	pr_err("%s enter \n",__FUNCTION__);
 
 	wdev_lock(wdev);
 	spin_lock_bh(&rdev->bss_lock);
@@ -7031,6 +7059,7 @@ static int nl80211_dump_scan(struct sk_buff *skb, struct netlink_callback *cb)
 
 	cb->args[2] = idx;
 	nl80211_finish_wdev_dump(rdev);
+	pr_err("%s exit \n",__FUNCTION__);
 
 	return skb->len;
 }

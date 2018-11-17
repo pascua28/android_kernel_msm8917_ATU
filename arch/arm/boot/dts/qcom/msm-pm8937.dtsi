@@ -379,5 +379,16 @@
 			qcom,supported-sizes = <6>, <9>;
 			#pwm-cells = <2>;
 		};
+
+		pm8937_cpuinfo: cpuinfo {
+			compatible = "huawei,cpuinfo";
+			mss-reg = /bits/ 16 <0x1440 0x1441>; /*reg_type,reg_value*/
+			mss-para = <375000 12500 1550000 25000>; /*false_min,false_step,true_min,true_step*/
+			cx-reg = /bits/ 16 <0x1740 0x1741>; /*reg_type,reg_value*/
+			cx-para = <375000 12500 1550000 25000>; /* false_min,false_step,true_min,true_step*/
+			mx-reg = /bits/ 16 <0x4241>; /*reg_value*/
+			mx-para = <375000 12500>; /*min,step*/
+			status = "ok";
+		};
 	};
 };

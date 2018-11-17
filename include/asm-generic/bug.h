@@ -2,7 +2,9 @@
 #define _ASM_GENERIC_BUG_H
 
 #include <linux/compiler.h>
-
+#ifdef CONFIG_FASTBOOT_DUMP
+#include <linux/fastboot_dump_reason_api.h>
+#endif
 #ifdef CONFIG_GENERIC_BUG
 #define BUGFLAG_WARNING		(1 << 0)
 #define BUGFLAG_TAINT(taint)	(BUGFLAG_WARNING | ((taint) << 8))
@@ -47,6 +49,11 @@ struct bug_entry {
 #ifndef HAVE_ARCH_BUG
 #define BUG() do { \
 	printk("BUG: failure at %s:%d/%s()!\n", __FILE__, __LINE__, __func__); \
+#ifdef CONFIG_FASTBOOT_DUMP
+	fastboot_dump_s_reason_set(FD_S_APANIC_BUG); \
+	fastboot_dump_s_reason_str_set("Trigger_BUG_macro"); \
+	fastboot_dump_reset_reason_info_str_set("at %s:%d/%s()!",__FILE__, __LINE__, __func__); \
+#endif
 	panic("BUG!"); \
 } while (0)
 #endif

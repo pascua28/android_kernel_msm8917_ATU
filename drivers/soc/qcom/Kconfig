@@ -912,5 +912,6 @@ config WCD_DSP_GLINK
 	   provides read and write interface via char device.
 
 source "drivers/soc/qcom/memshare/Kconfig"
+source "drivers/soc/qcom/pil-q6v5-mss/Kconfig"
 
 endif # ARCH_MSM
