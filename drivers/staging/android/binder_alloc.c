@@ -58,7 +58,7 @@ static size_t binder_alloc_buffer_size(struct binder_alloc *alloc,
 		return alloc->buffer +
 		       alloc->buffer_size - (void *)buffer->data;
 	return (size_t)list_entry(buffer->entry.next,
-                         struct binder_buffer, entry) - (size_t)buffer->data;
+			  struct binder_buffer, entry) - (size_t)buffer->data;
 }
 
 static void binder_insert_free_buffer(struct binder_alloc *alloc,
@@ -500,7 +500,7 @@ static void binder_delete_free_buffer(struct binder_alloc *alloc,
 
 	if (!list_is_last(&buffer->entry, &alloc->buffers)) {
 		next = list_entry(buffer->entry.next,
-                                 struct binder_buffer, entry);
+				  struct binder_buffer, entry);
 		if (buffer_start_page(next) == buffer_end_page(buffer)) {
 			free_page_end = 0;
 			if (buffer_start_page(next) ==
@@ -561,8 +561,8 @@ static void binder_free_buf_locked(struct binder_alloc *alloc,
 	rb_erase(&buffer->rb_node, &alloc->allocated_buffers);
 	buffer->free = 1;
 	if (!list_is_last(&buffer->entry, &alloc->buffers)) {
-               struct binder_buffer *next = list_entry(buffer->entry.next,
-                                               struct binder_buffer, entry);
+		struct binder_buffer *next = list_entry(buffer->entry.next,
+						struct binder_buffer, entry);
 
 		if (next->free) {
 			rb_erase(&next->rb_node, &alloc->free_buffers);
@@ -570,8 +570,8 @@ static void binder_free_buf_locked(struct binder_alloc *alloc,
 		}
 	}
 	if (alloc->buffers.next != &buffer->entry) {
-               struct binder_buffer *prev = list_entry(buffer->entry.prev,
-                                               struct binder_buffer, entry);
+		struct binder_buffer *prev = list_entry(buffer->entry.prev,
+						struct binder_buffer, entry);
 
 		if (prev->free) {
 			binder_delete_free_buffer(alloc, buffer);
