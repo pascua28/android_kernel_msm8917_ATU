@@ -51,16 +51,6 @@ module_param_named(debug_mask, binder_alloc_debug_mask,
 			pr_info(x); \
 	} while (0)
 
-static struct binder_buffer *binder_buffer_next(struct binder_buffer *buffer)
-{
-	return list_entry(buffer->entry.next, struct binder_buffer, entry);
-}
-
-static struct binder_buffer *binder_buffer_prev(struct binder_buffer *buffer)
-{
-	return list_entry(buffer->entry.prev, struct binder_buffer, entry);
-}
-
 static size_t binder_alloc_buffer_size(struct binder_alloc *alloc,
 				       struct binder_buffer *buffer)
 {
@@ -509,7 +499,7 @@ static void binder_delete_free_buffer(struct binder_alloc *alloc,
 	}
 
 	if (!list_is_last(&buffer->entry, &alloc->buffers)) {
-               next = list_entry(buffer->entry.next,
+		next = list_entry(buffer->entry.next,
                                  struct binder_buffer, entry);
 		if (buffer_start_page(next) == buffer_end_page(buffer)) {
 			free_page_end = 0;
