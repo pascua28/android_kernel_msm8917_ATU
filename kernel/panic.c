@@ -24,6 +24,7 @@
 #include <linux/init.h>
 #include <linux/nmi.h>
 #include <linux/console.h>
+#include <chipset_common/bfmr/bfm/chipsets/qcom/bfm_qcom.h>
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/exception.h>
@@ -78,6 +79,8 @@ void panic(const char *fmt, ...)
 	va_list args;
 	long i, i_next = 0;
 	int state = 0;
+
+	qcom_set_boot_fail_flag(KERNEL_AP_PANIC);
 
 	trace_kernel_panic(0);
 	/*
@@ -244,6 +247,7 @@ static const struct tnt tnts[] = {
 	{ TAINT_OOT_MODULE,		'O', ' ' },
 	{ TAINT_UNSIGNED_MODULE,	'E', ' ' },
 	{ TAINT_SOFTLOCKUP,		'L', ' ' },
+	{ TAINT_LIVEPATCH,		'K', ' ' },
 };
 
 /**
@@ -264,6 +268,7 @@ static const struct tnt tnts[] = {
  *  'O' - Out-of-tree module has been loaded.
  *  'E' - Unsigned module has been loaded.
  *  'L' - A soft lockup has previously occurred.
+ *  'K' - Kernel has been live patched.
  *
  *	The string is overwritten by the next call to print_tainted().
  */

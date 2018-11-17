@@ -64,9 +64,16 @@
 #include <linux/sched/sysctl.h>
 #include <linux/kexec.h>
 
+#ifdef CONFIG_HUAWEI_BOOST_SIGKILL_FREE
+#include <linux/boost_sigkill_free.h>
+#endif
+
 #include <asm/uaccess.h>
 #include <asm/processor.h>
-
+#ifdef CONFIG_HUAWEI_KERNEL
+#include <linux/qpnp/power-on.h>
+extern int huawei_pon_regs[MAX_REG_TYPE];
+#endif
 #ifdef CONFIG_X86
 #include <asm/nmi.h>
 #include <asm/stacktrace.h>
@@ -92,6 +99,9 @@
 #include <linux/nmi.h>
 #endif
 
+#ifdef CONFIG_HUAWEI_UNMOVABLE_ISOLATE
+#include <linux/unmovable_isolate.h>
+#endif
 
 #if defined(CONFIG_SYSCTL)
 
@@ -273,9 +283,22 @@ static int max_sched_tunable_scaling = SCHED_TUNABLESCALING_END-1;
 #endif /* CONFIG_SMP */
 #endif /* CONFIG_SCHED_DEBUG */
 
+#ifdef CONFIG_HW_VIP_THREAD
+static int min_sched_delay_granularity;
+static int max_sched_delay_granularity = 16;
+static int min_dynamic_vip_granularity;
+static int max_dynamic_vip_granularity = 32;
+static int min_migration_delay_granularity;
+static int max_migration_delay_granulartiy = 16;
+#endif
+
 #ifdef CONFIG_COMPACTION
 static int min_extfrag_threshold;
 static int max_extfrag_threshold = 1000;
+#endif
+#ifdef CONFIG_SHRINK_MEMORY
+static int min_shrink_memory = 1;
+static int max_shrink_memory = 100;
 #endif
 
 static struct ctl_table kern_table[] = {
@@ -286,6 +309,53 @@ static struct ctl_table kern_table[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec,
 	},
+#ifdef CONFIG_HW_VIP_THREAD
+	{
+		.procname   = "vip_min_sched_delay_granularity",
+		.data       = &vip_min_sched_delay_granularity,
+		.maxlen     = sizeof(int),
+		.mode       = 0644,
+		.proc_handler = proc_dointvec_minmax,
+		.extra1     = &min_sched_delay_granularity,
+		.extra2     = &max_sched_delay_granularity,
+	},
+	{
+		.procname   = "vip_max_dynamic_granularity",
+		.data       = &vip_max_dynamic_granularity,
+		.maxlen     = sizeof(int),
+		.mode       = 0644,
+		.proc_handler = proc_dointvec_minmax,
+		.extra1     = &min_dynamic_vip_granularity,
+		.extra2     = &max_dynamic_vip_granularity,
+	},
+	{
+		.procname   = "vip_min_migration_delay",
+		.data       = &vip_min_migration_delay,
+		.maxlen     = sizeof(int),
+		.mode       = 0644,
+		.proc_handler = proc_dointvec_minmax,
+		.extra1     = &min_migration_delay_granularity,
+		.extra2     = &max_migration_delay_granulartiy,
+	},
+#endif
+#ifdef CONFIG_HUAWEI_BOOST_KILL
+	{
+		.procname	= "boost_killing",
+		.data		= &sysctl_boost_killing,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+#endif
+#ifdef CONFIG_HUAWEI_BOOST_SIGKILL_FREE
+	{
+		.procname	= "boost_sigkill_free",
+		.data		= &sysctl_boost_sigkill_free,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+#endif
 	{
 		.procname	= "sched_wake_to_idle",
 		.data		= &sysctl_sched_wake_to_idle,
@@ -1607,6 +1677,17 @@ static struct ctl_table vm_table[] = {
 	},
 
 #endif /* CONFIG_COMPACTION */
+#ifdef CONFIG_SHRINK_MEMORY
+       {
+       .procname    = "shrink_memory",
+       .data        = &sysctl_shrink_memory,
+       .maxlen      = sizeof(int),
+       .mode        = 0200,
+       .proc_handler = sysctl_shrinkmem_handler,
+       .extra1      = &min_shrink_memory,
+       .extra2      = &max_shrink_memory,
+       },
+#endif
 	{
 		.procname	= "min_free_kbytes",
 		.data		= &min_free_kbytes,
@@ -1844,6 +1925,17 @@ static struct ctl_table vm_table[] = {
 		.extra2		= (void *)&mmap_rnd_compat_bits_max,
 	},
 #endif
+#ifdef CONFIG_HUAWEI_UNMOVABLE_ISOLATE
+	{
+		.procname	= "unmovable_isolate_disabled",
+		.data		= &unmovable_isolate_disabled,
+		.maxlen		= sizeof(unmovable_isolate_disabled),
+		.mode		= 0644,
+		.proc_handler	= unmovable_isolate_disabled_sysctl_handler,
+		.extra1		= &one,
+		.extra2		= &one,
+	},
+#endif
 	{ }
 };
 
@@ -2053,6 +2145,15 @@ static struct ctl_table debug_table[] = {
 		.proc_handler	= proc_kprobes_optimization_handler,
 		.extra1		= &zero,
 		.extra2		= &one,
+	},
+#endif
+#ifdef CONFIG_HUAWEI_KERNEL
+	{
+		.procname   = "poweronoff_reason",
+		.data       = huawei_pon_regs,
+		.maxlen     = sizeof(huawei_pon_regs),
+		.mode       = 0644,
+		.proc_handler   = proc_dointvec,
 	},
 #endif
 	{ }

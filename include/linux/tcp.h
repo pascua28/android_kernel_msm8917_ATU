@@ -152,7 +152,9 @@ struct tcp_sock {
 	u32	copied_seq;	/* Head of yet unread data		*/
 	u32	rcv_wup;	/* rcv_nxt on last window update sent	*/
  	u32	snd_nxt;	/* Next sequence we send		*/
-
+#ifdef CONFIG_TCP_AUTOTUNING
+	u32	segs_in;      /* RFC4898 tcpEStatsPerfSegsIn total number of data segments in.*/
+#endif
  	u32	snd_una;	/* First byte we want an ack for	*/
  	u32	snd_sml;	/* Last byte of the most recently transmitted small packet */
 	u32	rcv_tstamp;	/* timestamp of last received ACK (for keepalives) */
@@ -288,6 +290,9 @@ struct tcp_sock {
 		u32	rtt;
 		u32	seq;
 		u32	time;
+#ifdef CONFIG_TCP_AUTOTUNING
+		u32	min_rtt;
+#endif
 	} rcv_rtt_est;
 
 /* Receiver queue space */
@@ -295,7 +300,19 @@ struct tcp_sock {
 		u32	space;
 		u32	seq;
 		u32	time;
+#ifdef CONFIG_TCP_AUTOTUNING
+		u32	segs;
+#endif
 	} rcvq_space;
+
+#ifdef CONFIG_TCP_AUTOTUNING
+	struct {
+		u32 loss;
+		u32 bw;
+		u32 rtt_cnt;
+		u32 rcv_wnd;
+       } rcv_rate;
+#endif
 
 /* TCP-specific MTU probe information. */
 	struct {
@@ -320,6 +337,10 @@ struct tcp_sock {
 	 * socket. Used to retransmit SYNACKs etc.
 	 */
 	struct request_sock *fastopen_rsk;
+#ifdef CONFIG_CHR_NETLINK_MODULE
+	u8 first_data_flag;
+	u8 data_net_flag;
+#endif
 };
 
 enum tsq_flags {

@@ -256,7 +256,11 @@ void gic_show_pending_irq(void)
 		}
 	}
 }
-
+#ifdef CONFIG_WIFI_WAKE_SRC
+#define WCNSS_WLAN_RX_DATA_AVAIL 178
+volatile bool g_wifi_firstwake = false;
+EXPORT_SYMBOL(g_wifi_firstwake);
+#endif
 static void gic_show_resume_irq(struct gic_chip_data *gic)
 {
 	unsigned int i;
@@ -287,7 +291,12 @@ static void gic_show_resume_irq(struct gic_chip_data *gic)
 			name = "stray irq";
 		else if (desc->action && desc->action->name)
 			name = desc->action->name;
-
+#ifdef CONFIG_WIFI_WAKE_SRC
+		if(WCNSS_WLAN_RX_DATA_AVAIL == (i + gic->irq_offset)){
+		    g_wifi_firstwake = true;
+			pr_warning("%s: triggered by wcnss\n", __func__);
+		}
+#endif
 		pr_warning("%s: %d triggered %s\n", __func__,
 					i + gic->irq_offset, name);
 		log_base_wakeup_reason(i + gic->irq_offset);

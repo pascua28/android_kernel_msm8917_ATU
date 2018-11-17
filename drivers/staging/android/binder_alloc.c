@@ -29,6 +29,9 @@
 #include <linux/sched.h>
 #include "binder_alloc.h"
 #include "binder_trace.h"
+#ifdef CONFIG_HUAWEI_KSTATE
+#include <linux/hw_kcollect.h>
+#endif
 
 static DEFINE_MUTEX(binder_alloc_mmap_lock);
 
@@ -48,14 +51,23 @@ module_param_named(debug_mask, binder_alloc_debug_mask,
 			pr_info(x); \
 	} while (0)
 
+static struct binder_buffer *binder_buffer_next(struct binder_buffer *buffer)
+{
+	return list_entry(buffer->entry.next, struct binder_buffer, entry);
+}
+
+static struct binder_buffer *binder_buffer_prev(struct binder_buffer *buffer)
+{
+	return list_entry(buffer->entry.prev, struct binder_buffer, entry);
+}
+
 static size_t binder_alloc_buffer_size(struct binder_alloc *alloc,
 				       struct binder_buffer *buffer)
 {
 	if (list_is_last(&buffer->entry, &alloc->buffers))
 		return alloc->buffer +
 		       alloc->buffer_size - (void *)buffer->data;
-	return (size_t)list_entry(buffer->entry.next,
-			  struct binder_buffer, entry) - (size_t)buffer->data;
+	return (size_t)binder_buffer_next(buffer) - (size_t)buffer->data;
 }
 
 static void binder_insert_free_buffer(struct binder_alloc *alloc,
@@ -313,6 +325,20 @@ struct binder_buffer *binder_alloc_new_buf_locked(struct binder_alloc *alloc,
 				alloc->pid, extra_buffers_size);
 		return ERR_PTR(-EINVAL);
 	}
+#ifdef CONFIG_HUAWEI_KSTATE
+	/*
+	* if async and no more async space left.
+	* data bigger 1/3 buffer or buffer free lower 100K
+	*/
+	if (is_async
+		&& (alloc->free_async_space
+			< 3*(size + sizeof(struct binder_buffer))
+			|| alloc->free_async_space < 100*1024)) {
+		pr_warn("will no more space [freed:%zd][alloc size:%zd], pid [%d]\n",
+			alloc->free_async_space, size, alloc->pid);
+		hwbinderinfo(-1, alloc->pid);
+	}
+#endif
 	if (is_async &&
 	    alloc->free_async_space < size + sizeof(struct binder_buffer)) {
 		binder_alloc_debug(BINDER_DEBUG_BUFFER_ALLOC,
@@ -470,7 +496,7 @@ static void binder_delete_free_buffer(struct binder_alloc *alloc,
 	int free_page_start = 1;
 
 	BUG_ON(alloc->buffers.next == &buffer->entry);
-	prev = list_entry(buffer->entry.prev, struct binder_buffer, entry);
+	prev = binder_buffer_prev(buffer);
 	BUG_ON(!prev->free);
 	if (buffer_end_page(prev) == buffer_start_page(buffer)) {
 		free_page_start = 0;
@@ -482,8 +508,7 @@ static void binder_delete_free_buffer(struct binder_alloc *alloc,
 	}
 
 	if (!list_is_last(&buffer->entry, &alloc->buffers)) {
-		next = list_entry(buffer->entry.next,
-				  struct binder_buffer, entry);
+		next = binder_buffer_next(buffer);
 		if (buffer_start_page(next) == buffer_end_page(buffer)) {
 			free_page_end = 0;
 			if (buffer_start_page(next) ==
@@ -544,8 +569,7 @@ static void binder_free_buf_locked(struct binder_alloc *alloc,
 	rb_erase(&buffer->rb_node, &alloc->allocated_buffers);
 	buffer->free = 1;
 	if (!list_is_last(&buffer->entry, &alloc->buffers)) {
-		struct binder_buffer *next = list_entry(buffer->entry.next,
-						struct binder_buffer, entry);
+		struct binder_buffer *next = binder_buffer_next(buffer);
 
 		if (next->free) {
 			rb_erase(&next->rb_node, &alloc->free_buffers);
@@ -553,8 +577,7 @@ static void binder_free_buf_locked(struct binder_alloc *alloc,
 		}
 	}
 	if (alloc->buffers.next != &buffer->entry) {
-		struct binder_buffer *prev = list_entry(buffer->entry.prev,
-						struct binder_buffer, entry);
+		struct binder_buffer *prev = binder_buffer_prev(buffer);
 
 		if (prev->free) {
 			binder_delete_free_buffer(alloc, buffer);

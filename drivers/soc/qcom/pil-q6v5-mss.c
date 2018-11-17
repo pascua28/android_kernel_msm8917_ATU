@@ -28,6 +28,9 @@
 #include <linux/dma-mapping.h>
 #include <linux/of_gpio.h>
 #include <linux/clk/msm-clk.h>
+#ifdef CONFIG_FASTBOOT_DUMP
+#include <linux/fastboot_dump_reason_api.h>
+#endif
 #include <soc/qcom/subsystem_restart.h>
 #include <soc/qcom/ramdump.h>
 #include <soc/qcom/smem.h>
@@ -36,6 +39,14 @@
 #include "peripheral-loader.h"
 #include "pil-q6v5.h"
 #include "pil-msa.h"
+
+#ifdef CONFIG_PIL_Q6V5_MSS
+#include "pil-q6v5-mss/pil_q6v5_mss_ultils.h"
+#endif
+
+#ifdef CONFIG_PIL_Q6V5_MSS_LOG
+#include "pil-q6v5-mss/pil_q6v5_mss_log.h"
+#endif
 
 #define MAX_VDD_MSS_UV		1150000
 #define PROXY_TIMEOUT_MS	10000
@@ -62,6 +73,17 @@ static void log_modem_sfr(void)
 
 	strlcpy(reason, smem_reason, min(size, MAX_SSR_REASON_LEN));
 	pr_err("modem subsystem failure reason: %s.\n", reason);
+
+#ifdef CONFIG_PIL_Q6V5_MSS_LOG
+    save_modem_reset_log(reason);
+#endif
+
+#ifdef CONFIG_FASTBOOT_DUMP
+	fastboot_dump_m_reason_set(FD_M_SUBSYSTEM);
+	fastboot_dump_s_reason_set(FD_S_SUBSYSTEM_MODEM_CRASH);
+	fastboot_dump_s_reason_str_set("Modem_crash");
+#endif
+
 
 	smem_reason[0] = '\0';
 	wmb();
@@ -130,6 +152,10 @@ static int modem_powerup(const struct subsys_desc *subsys)
 {
 	struct modem_data *drv = subsys_to_drv(subsys);
 
+#ifdef CONFIG_PIL_Q6V5_MSS
+    int ret = 0;
+#endif
+
 	if (subsys->is_not_loadable)
 		return 0;
 	/*
@@ -141,7 +167,14 @@ static int modem_powerup(const struct subsys_desc *subsys)
 	drv->subsys_desc.ramdump_disable = 0;
 	drv->ignore_errors = false;
 	drv->q6->desc.fw_name = subsys->fw_name;
+#ifdef CONFIG_PIL_Q6V5_MSS
+    ret = pil_boot(&drv->q6->desc);
+    /* after modem restart, restart oem qmi */
+    restart_oem_qmi();
+    return ret;
+#else
 	return pil_boot(&drv->q6->desc);
+#endif
 }
 
 static void modem_crash_shutdown(const struct subsys_desc *subsys)
@@ -221,6 +254,10 @@ static int pil_subsys_init(struct modem_data *drv,
 		ret = PTR_ERR(drv->subsys);
 		goto err_subsys;
 	}
+
+#ifdef CONFIG_PIL_Q6V5_MSS
+    create_modem_log_queue();
+#endif
 
 	drv->q6->desc.subsys_dev = drv->subsys;
 	drv->ramdump_dev = create_ramdump_device("modem", &pdev->dev);
@@ -388,6 +425,10 @@ static int pil_mss_driver_probe(struct platform_device *pdev)
 static int pil_mss_driver_exit(struct platform_device *pdev)
 {
 	struct modem_data *drv = platform_get_drvdata(pdev);
+
+#ifdef CONFIG_PIL_Q6V5_MSS
+	destroy_modem_log_queue();
+#endif
 
 	subsys_unregister(drv->subsys);
 	destroy_ramdump_device(drv->ramdump_dev);

@@ -7,11 +7,31 @@ struct page;
 struct vm_area_struct;
 struct mm_struct;
 
+#ifdef CONFIG_MM_DEBUG
 extern void dump_page(struct page *page, const char *reason);
 extern void dump_page_badflags(struct page *page, const char *reason,
 			       unsigned long badflags);
 void dump_vma(const struct vm_area_struct *vma);
 void dump_mm(const struct mm_struct *mm);
+#else
+static inline void dump_page(struct page *page, const char *reason)
+{
+    return;
+}
+static inline void dump_page_badflags(struct page *page, const char *reason,
+			       unsigned long badflags)
+{
+   return;
+}
+static inline void dump_vma(const struct vm_area_struct *vma)
+{
+    return;
+}
+static inline void dump_mm(const struct mm_struct *mm)
+{
+    return;
+}
+#endif
 
 #ifdef CONFIG_DEBUG_VM
 #define VM_BUG_ON(cond) BUG_ON(cond)

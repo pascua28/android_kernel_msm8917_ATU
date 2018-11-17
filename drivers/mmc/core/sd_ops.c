@@ -22,6 +22,10 @@
 #include "core.h"
 #include "sd_ops.h"
 
+#ifdef CONFIG_HUAWEI_SDCARD_DSM
+#include <linux/mmc/dsm_sdcard.h>
+#endif
+
 int mmc_app_cmd(struct mmc_host *host, struct mmc_card *card)
 {
 	int err;
@@ -41,6 +45,10 @@ int mmc_app_cmd(struct mmc_host *host, struct mmc_card *card)
 	}
 
 	err = mmc_wait_for_cmd(host, &cmd, 0);
+
+#ifdef CONFIG_HUAWEI_SDCARD_DSM
+	err = sdcard_cmd55_resp_err_dsm(host, &cmd, err);
+#endif
 	if (err)
 		return err;
 
@@ -163,8 +171,13 @@ int mmc_send_app_op_cond(struct mmc_host *host, u32 ocr, u32 *rocr)
 
 	for (i = 100; i; i--) {
 		err = mmc_wait_for_app_cmd(host, NULL, &cmd, MMC_CMD_RETRIES);
-		if (err)
+
+		if (err){
+#ifdef CONFIG_HUAWEI_SDCARD_DSM
+			sdcard_cmd41_resp_err_dsm(host, &cmd, err);
+#endif
 			break;
+		}
 
 		/* if we're just probing, do a single pass */
 		if (ocr == 0)
@@ -181,11 +194,16 @@ int mmc_send_app_op_cond(struct mmc_host *host, u32 ocr, u32 *rocr)
 
 		err = -ETIMEDOUT;
 
-		mmc_delay(10);
+		mmc_delay(18);
+#ifdef CONFIG_HUAWEI_SDCARD_DSM
+		set_dsm_sdcard_cmd_log_value(NULL, host, DSM_SDCARD_ACMD41, cmd.resp[0]);
+#endif
 	}
 
-	if (!i)
+	if (!i) {
+		host->sd_acmd41_timeout_cnt++;
 		pr_err("%s: card never left busy state\n", mmc_hostname(host));
+	}
 
 	if (rocr && !mmc_host_is_spi(host))
 		*rocr = cmd.resp[0];
@@ -210,8 +228,12 @@ int mmc_send_if_cond(struct mmc_host *host, u32 ocr)
 	cmd.flags = MMC_RSP_SPI_R7 | MMC_RSP_R7 | MMC_CMD_BCR;
 
 	err = mmc_wait_for_cmd(host, &cmd, 0);
+#ifdef CONFIG_HUAWEI_SDCARD_DSM
+	sdcard_cmd8_resp_err_dsm(host, &cmd, err);
+#endif
 	if (err)
 		return err;
+
 
 	if (mmc_host_is_spi(host))
 		result_pattern = cmd.resp[1] & 0xFF;
@@ -237,6 +259,10 @@ int mmc_send_relative_addr(struct mmc_host *host, unsigned int *rca)
 	cmd.flags = MMC_RSP_R6 | MMC_CMD_BCR;
 
 	err = mmc_wait_for_cmd(host, &cmd, MMC_CMD_RETRIES);
+
+#ifdef CONFIG_HUAWEI_SDCARD_DSM
+	sdcard_cmd3_resp_err_dsm(host, &cmd, err);
+#endif
 	if (err)
 		return err;
 

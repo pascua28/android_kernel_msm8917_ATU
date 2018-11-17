@@ -16,7 +16,7 @@
 &int_codec {
 	qcom,model = "msm8953-snd-card-mtp";
 
-	qcom,cdc-us-euro-gpios = <&tlmm 63 0>;
+	/* qcom,cdc-us-euro-gpios = <&tlmm 63 0>; */
 	qcom,msm-mbhc-hphl-swh = <0>;
 	qcom,msm-mbhc-gnd-swh = <0>;
 	qcom,msm-hs-micbias-type = "internal";
@@ -138,7 +138,7 @@
 &ext_codec {
 	qcom,model = "msm8953-tasha-snd-card";
 
-	qcom,cdc-us-euro-gpios = <&tlmm 63 0>;
+	/* qcom,cdc-us-euro-gpios = <&tlmm 63 0>;*/
 	qcom,msm-mbhc-hphl-swh = <0>;
 	qcom,msm-mbhc-gnd-swh = <0>;
 

@@ -362,6 +362,9 @@ struct sock {
 	struct sk_filter __rcu	*sk_filter;
 	struct socket_wq __rcu	*sk_wq;
 
+#ifdef CONFIG_HW_DPIMARK_MODULE
+	unsigned int    sk_hwdpi_mark;
+#endif
 #ifdef CONFIG_XFRM
 	struct xfrm_policy	*sk_policy[2];
 #endif
@@ -421,6 +424,11 @@ struct sock {
 	int			sk_write_pending;
 #ifdef CONFIG_SECURITY
 	void			*sk_security;
+#endif
+
+#ifdef CONFIG_HW_WIFIPRO
+	int wifipro_is_google_sock;
+	char wifipro_dev_name[IFNAMSIZ];
 #endif
 	__u32			sk_mark;
 	kuid_t			sk_uid;

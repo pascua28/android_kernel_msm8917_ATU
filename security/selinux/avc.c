@@ -715,6 +715,10 @@ static void avc_audit_pre_callback(struct audit_buffer *ab, void *a)
 	avc_dump_av(ab, ad->selinux_audit_data->tclass,
 			ad->selinux_audit_data->audited);
 	audit_log_format(ab, " for ");
+
+#ifdef CONFIG_HUAWEI_SELINUX_DSM
+	selinux_dsm_process(ab, a, ad->selinux_audit_data->denied);
+#endif
 }
 
 /**

@@ -20,4 +20,8 @@
 
 #define MODULE_ARCH_VERMAGIC	"aarch64"
 
+extern int static_relocate(struct module *mod, unsigned long type,
+			void * loc, unsigned long value);
+
+
 #endif /* __ASM_MODULE_H */

@@ -871,4 +871,11 @@ config SND_SOC_MSM_HDMI_CODEC_RX
 config SND_SOC_MSM_HDMI_DBA_CODEC_RX
 	bool "HDMI DBA Audio Playback"
 	depends on MSM_DBA
+
+# use for tfa98980 smart pa #
+source "sound/soc/codecs/tfa98xx/Kconfig"
+
+# use for tas2560 smart pa #
+source "sound/soc/codecs/tas2560_driver/Kconfig"
+
 endmenu

@@ -190,6 +190,8 @@ done:
  *	quite explicitly by POSIX 1003.1g, don't change them without having
  *	the standard around please.
  */
+#define SKB_RECV_TIMEOUT 50
+
 struct sk_buff *__skb_recv_datagram(struct sock *sk, unsigned int flags,
 				    int *peeked, int *off, int *err)
 {
@@ -197,6 +199,7 @@ struct sk_buff *__skb_recv_datagram(struct sock *sk, unsigned int flags,
 	struct sk_buff *skb, *last;
 	unsigned long cpu_flags;
 	long timeo;
+	int skbrecvtimeout=0;
 	/*
 	 * Caller is allowed not to check sk->sk_err before skb_recv_datagram()
 	 */
@@ -216,6 +219,8 @@ struct sk_buff *__skb_recv_datagram(struct sock *sk, unsigned int flags,
 		 */
 		int _off = *off;
 
+		skbrecvtimeout++;
+
 		last = (struct sk_buff *)queue;
 		spin_lock_irqsave(&queue->lock, cpu_flags);
 		skb_queue_walk(queue, skb) {
@@ -225,6 +230,9 @@ struct sk_buff *__skb_recv_datagram(struct sock *sk, unsigned int flags,
 				if (_off >= skb->len && (skb->len || _off ||
 							 skb->peeked)) {
 					_off -= skb->len;
+					if(SKB_RECV_TIMEOUT == skbrecvtimeout){
+						pr_err("%s MSG_PEEK %d %d %d \n",__FUNCTION__,skb->len ,_off,skb->peeked);
+					}
 					continue;
 				}
 
@@ -244,8 +252,12 @@ struct sk_buff *__skb_recv_datagram(struct sock *sk, unsigned int flags,
 		spin_unlock_irqrestore(&queue->lock, cpu_flags);
 
 		if (sk_can_busy_loop(sk) &&
-		    sk_busy_loop(sk, flags & MSG_DONTWAIT))
+		    sk_busy_loop(sk, flags & MSG_DONTWAIT)){
+		    if(SKB_RECV_TIMEOUT == skbrecvtimeout){
+				pr_err("%s sk_can_busy_loop\n",__FUNCTION__);
+			}
 			continue;
+		}
 
 		/* User doesn't want to wait */
 		error = -EAGAIN;

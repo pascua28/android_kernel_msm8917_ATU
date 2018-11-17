@@ -41,13 +41,14 @@
 #include <linux/msm_ion.h>
 #include <linux/msm_dma_iommu_mapping.h>
 #include <trace/events/kmem.h>
-
+#include <linux/atomic.h>
 
 #include "ion.h"
 #include "ion_priv.h"
 #include "compat_ion.h"
 
 static struct ion_device *ion_dev;
+static atomic_long_t ion_total_size;
 
 bool ion_buffer_fault_user_mappings(struct ion_buffer *buffer)
 {
@@ -186,6 +187,10 @@ static struct ion_buffer *ion_buffer_create(struct ion_heap *heap,
 		if (sg_dma_address(sg) == 0)
 			sg_dma_address(sg) = sg_phys(sg);
 	}
+
+	if (buffer->heap->type != ION_HEAP_TYPE_CARVEOUT)
+		atomic_long_add(buffer->size, &ion_total_size);
+
 	mutex_lock(&dev->buffer_lock);
 	ion_buffer_add(dev, buffer);
 	mutex_unlock(&dev->buffer_lock);
@@ -203,6 +208,9 @@ err2:
 
 void ion_buffer_destroy(struct ion_buffer *buffer)
 {
+	if (buffer->heap->type != ION_HEAP_TYPE_CARVEOUT)
+		atomic_long_sub(buffer->size, &ion_total_size);
+
 	if (WARN_ON(buffer->kmap_cnt > 0))
 		buffer->heap->ops->unmap_kernel(buffer->heap, buffer);
 	buffer->heap->ops->unmap_dma(buffer->heap, buffer);
@@ -2069,4 +2077,71 @@ void __init ion_reserve(struct ion_platform_data *data)
 			&data->heaps[i].base,
 			data->heaps[i].size);
 	}
+}
+static size_t ion_client_total(struct ion_client *client)
+{
+	size_t size = 0;
+	struct rb_node *n;
+
+	mutex_lock(&client->lock);
+	for (n = rb_first(&client->handles); n; n = rb_next(n)) {
+		struct ion_handle *handle = rb_entry(n,
+				struct ion_handle, node);
+		if (handle->buffer->heap->type !=
+					ION_HEAP_TYPE_CARVEOUT)
+			size += handle->buffer->size;
+	}
+	mutex_unlock(&client->lock);
+	return size;
+}
+
+unsigned long get_ion_total(void)
+{
+	return (unsigned long)atomic_long_read(&ion_total_size);
+}
+
+int dump_ion_memory_info(bool verbose)
+{
+	struct rb_node *n;
+	struct ion_device *dev = ion_dev;
+
+	if (!dev)
+		return -1;
+	pr_info("ion total size:%ld\n", atomic_long_read(&ion_total_size));
+	if (!verbose)
+		return 0;
+
+	down_read(&dev->lock);
+	for (n = rb_first(&dev->clients); n; n = rb_next(n)) {
+		struct ion_client *client = rb_entry(n,
+				struct ion_client, node);
+		size_t size = ion_client_total(client);
+
+		if (!size)
+			continue;
+		if (client->task) {
+			char task_comm[TASK_COMM_LEN];
+
+			get_task_comm(task_comm, client->task);
+			pr_info("%16.s %16u %16zu\n",
+				task_comm, client->pid, size);
+		} else {
+			pr_info("%16.s %16u %16zu\n",
+				client->name, client->pid, size);
+		}
+	}
+	up_read(&dev->lock);
+	pr_info("orphaned allocations (info is from last known client):\n");
+	mutex_lock(&dev->buffer_lock);
+	for (n = rb_first(&dev->buffers); n; n = rb_next(n)) {
+		struct ion_buffer *buffer = rb_entry(n, struct ion_buffer,
+				node);
+
+		if (!buffer->handle_count &&
+			(buffer->heap->type != ION_HEAP_TYPE_CARVEOUT))
+			pr_info("%16.s %16u %16zu\n", buffer->task_comm,
+				buffer->pid, buffer->size);
+	}
+	mutex_unlock(&dev->buffer_lock);
+	return 0;
 }

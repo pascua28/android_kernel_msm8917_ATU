@@ -87,9 +87,17 @@ config INET
 	  Short answer: say Y.
 
 if INET
+
+config HUAWEI_MSS_AUTO_CHANGE
+    bool "Huawei MSS auto change function support"
+    default n
+
+source "net/ipv4/tmss/Kconfig"
 source "net/ipv4/Kconfig"
 source "net/ipv6/Kconfig"
 source "net/netlabel/Kconfig"
+source "net/network_aware/Kconfig"
+source "net/hw_dpi_mark/Kconfig"
 
 endif # if INET
 
@@ -404,6 +412,7 @@ source "net/caif/Kconfig"
 source "net/ceph/Kconfig"
 source "net/nfc/Kconfig"
 source "net/ipc_router/Kconfig"
+source "net/chr/Kconfig"
 
 endif   # if NET
 

@@ -73,6 +73,10 @@ static struct vfsmount *shm_mnt;
 #include <asm/uaccess.h>
 #include <asm/pgtable.h>
 
+#ifdef CONFIG_HW_MEMORY_MONITOR
+#include <chipset_common/mmonitor/mmonitor.h>
+#endif
+
 #define BLOCKS_PER_PAGE  (PAGE_CACHE_SIZE/512)
 #define VM_ACCT(size)    (PAGE_CACHE_ALIGN(size) >> PAGE_SHIFT)
 
@@ -1089,6 +1093,9 @@ repeat:
 	if (swap.val) {
 		/* Look it up and read it in.. */
 		page = lookup_swap_cache(swap);
+#ifdef CONFIG_HW_MEMORY_MONITOR
+		count_mmonitor_event(FILE_CACHE_MAP_COUNT);
+#endif
 		if (!page) {
 			/* here we actually do the io */
 			if (fault_type)

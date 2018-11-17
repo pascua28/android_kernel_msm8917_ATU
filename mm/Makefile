@@ -39,7 +39,7 @@ obj-y			:= filemap.o mempool.o oom_kill.o \
 			   mm_init.o mmu_context.o percpu.o slab_common.o \
 			   compaction.o vmacache.o \
 			   interval_tree.o list_lru.o workingset.o \
-			   iov_iter.o debug.o $(mmu-y) showmem.o \
+			   iov_iter.o  $(mmu-y) showmem.o \
 			   vmpressure.o
 
 obj-y += init-mm.o
@@ -49,6 +49,8 @@ ifdef CONFIG_NO_BOOTMEM
 else
 	obj-y		+= bootmem.o
 endif
+
+obj-$(CONFIG_MM_DEBUG)	+= debug.o
 
 obj-$(CONFIG_ADVISE_SYSCALLS)	+= fadvise.o
 ifdef CONFIG_MMU
@@ -96,5 +98,6 @@ obj-$(CONFIG_GENERIC_EARLY_IOREMAP) += early_ioremap.o
 obj-$(CONFIG_CMA)	+= cma.o
 obj-$(CONFIG_MEMORY_BALLOON) += balloon_compaction.o
 obj-$(CONFIG_PROCESS_RECLAIM)	+= process_reclaim.o
-obj-$(CONFIG_CMA_DEBUGFS) += cma_debug.o
 obj-$(CONFIG_HARDENED_USERCOPY) += usercopy.o
+obj-$(CONFIG_HUAWEI_UNMOVABLE_ISOLATE) += unmovable_isolate.o
+obj-$(CONFIG_HISI_MM) += hisi/

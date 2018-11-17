@@ -44,6 +44,13 @@ config ANDROID_BINDER_DEVICES
 	  created. Each binder device has its own context manager, and is
 	  therefore logically separated from the other devices.
 
+config HW_BINDER_FG_REQ_FIRST
+	bool "Huawei Binder Proceed Foreground Request First"
+	depends on ANDROID_BINDER_IPC && HW_VIP_THREAD
+	default n
+	---help---
+	  Enable binder optimization of Huawei.
+
 config ASHMEM
 	bool "Enable the Anonymous Shared Memory Subsystem"
 	default n
@@ -86,6 +93,13 @@ config ANDROID_LOW_MEMORY_KILLER
 	bool "Android Low Memory Killer"
 	---help---
 	  Registers processes to be killed when memory is low
+
+config HUAWEI_LMK_DBG
+	bool "HUAWEI Low Memory Killer debug"
+	default n
+	depends on ANDROID_LOW_MEMORY_KILLER
+	---help---
+	  print processes info when lmk happen per several seconds
 
 config ANDROID_LOW_MEMORY_KILLER_AUTODETECT_OOM_ADJ_VALUES
 	bool "Android Low Memory Killer: detect oom_adj values"
@@ -138,9 +152,38 @@ config ONESHOT_SYNC_USER
 	help
 	  Provide a userspace API for creating oneshot sync objects.
 
+config HUAWEI_RCC
+	tristate "RAM Compress and Clean"
+	depends on SYSFS && SWAP
+	default n
+	help
+	  Creates background thread for compress and clean used RAM
+	  dynamiclly,enabled by write 1 to /sys/kernel/rcc/enable.
+
+config HUAWEI_RCC_DEBUG
+	bool "RAM Compress and Clean debug support"
+	depends on HISI_RCC
+	default n
+	help
+	  This option adds additional debugging code to the
+	  RAM Compress and Clean module.
+
+config HISI_SMART_RECLAIM
+	bool "Enable smart reclaim"
+	default y
+	depends on PROCESS_RECLAIM
+	help
+	  When enabled, memory pages of background processes will be reclaimed.
+	  Depending on if the process is an application or service.
+	  In case of service, advise kernel to reclaim file backed pages
+	  of background processes(file tpyes .dex, .jar and/or .apk).
+	  This triggered by writting soft to /proc/<pid>/reclaim from user space.
+
 source "drivers/staging/android/ion/Kconfig"
 
 source "drivers/staging/android/fiq_debugger/Kconfig"
+
+source "drivers/staging/android/hwlogger/Kconfig"
 
 endif # if ANDROID
 

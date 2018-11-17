@@ -17,3 +17,7 @@ ifeq ($(CONFIG_SND),y)
 endif
 
 soundcore-objs  := sound_core.o
+
+obj-$(CONFIG_HW_AUDIO_INFO) += hw_audio_info.o
+obj-$(CONFIG_HW_AUDIO_KERNEL) += hw_audio_kernel.o
+ccflags-$(CONFIG_HUAWEI_DSM_AUDIO) += -Idrivers/devkit/audiokit/

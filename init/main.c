@@ -79,6 +79,15 @@
 #include <linux/random.h>
 #include <linux/list.h>
 
+#ifdef CONFIG_HUAWEI_BOOT_TIME
+#include <linux/hw_boottime.h>
+#endif
+
+/* AR0009CRQN yuanshuai 20170919 begin */
+#include <chipset_common/bfmr/bfm/chipsets/bfm_chipsets.h>
+#include <chipset_common/bfmr/bfm/chipsets/qcom/bfm_qcom.h>
+/* AR0009CRQN yuanshuai 20170919 end */
+
 #include <asm/io.h>
 #include <asm/bugs.h>
 #include <asm/setup.h>
@@ -500,6 +509,27 @@ static void __init mm_init(void)
 	vmalloc_init();
 }
 
+#ifdef CMDLINE_INFO_FILTER
+static void __init filter_args(char *cmdline) {
+	static char tmp_cmdline[COMMAND_LINE_SIZE] __initdata;
+	char *cmd_prefix = NULL;
+	char *cmd_suffix = NULL;
+	int len = 0;
+	strlcpy(tmp_cmdline, cmdline, COMMAND_LINE_SIZE);
+	cmd_prefix = strstr(tmp_cmdline, "androidboot.serialno");
+	if (cmd_prefix == NULL) {
+		pr_notice("Kernel command line: %s\n", tmp_cmdline);
+		return;
+	}
+	cmd_suffix = strstr(cmd_prefix, " ");
+	len = (cmd_suffix != NULL) ? (cmd_suffix - cmd_prefix)
+                             : (cmdline + strlen(cmdline) - cmd_prefix);
+	memset(cmd_prefix, '*', len);
+	pr_notice("Kernel command line: %s\n", tmp_cmdline);
+	return;
+}
+#endif
+
 asmlinkage __visible void __init start_kernel(void)
 {
 	char *command_line;
@@ -540,7 +570,10 @@ asmlinkage __visible void __init start_kernel(void)
 	build_all_zonelists(NULL, NULL);
 	page_alloc_init();
 
-	pr_notice("Kernel command line: %s\n", boot_command_line);
+#ifdef CMDLINE_INFO_FILTER
+	filter_args(boot_command_line);
+#endif
+
 	parse_early_param();
 	after_dashes = parse_args("Booting kernel",
 				  static_command_line, __start___param,
@@ -562,6 +595,8 @@ asmlinkage __visible void __init start_kernel(void)
 	sort_main_extable();
 	trap_init();
 	mm_init();
+
+	hwboot_fail_init_struct();
 
 	/*
 	 * Set up the scheduler prior starting any interrupts (such as the
@@ -795,7 +830,14 @@ int __init_or_module do_one_initcall(initcall_t fn)
 	if (initcall_debug)
 		ret = do_one_initcall_debug(fn);
 	else
+	{
+#ifdef CONFIG_HUAWEI_BOOT_TIME
+		ret = do_boottime_initcall(fn);
+#else
 		ret = fn();
+#endif
+	}
+		
 
 	msgbuf[0] = 0;
 
@@ -848,9 +890,55 @@ static char *initcall_level_names[] __initdata = {
 	"late",
 };
 
+/* AR0009CRQN yuanshuai 20170919 begin */
+#ifdef CONFIG_HUAWEI_BOOT_TIME
+extern void log_boot(char *str);
+#endif
+/* AR0009CRQN yuanshuai 20170919 end */
 static void __init do_initcall_level(int level)
 {
 	initcall_t *fn;
+
+/* AR0009CRQN yuanshuai 20170919 begin */    
+    switch(level)
+	{
+		case 0:
+			bfm_set_boot_stage(KERNEL_EARLY_INITCALL);
+			pr_info("Boot_monitor set stage:KERNEL_EARLY_INITCALL\n");
+			break;
+		case 1:
+			bfm_set_boot_stage(KERNEL_CORE_INITCALL_SYNC);
+			pr_info("Boot_monitor set stage:KERNEL_CORE_INITCALL_SYNC\n");
+			break;
+		case 2:
+			bfm_set_boot_stage(KERNEL_POSTCORE_INITCALL);
+			pr_info("Boot_monitor set stage:KERNEL_POSTCORE_INITCALL\n");
+			break;
+		case 3:
+			bfm_set_boot_stage(KERNEL_ARCH_INITCALL);;
+			pr_info("Boot_monitor set stage:KERNEL_ARCH_INITCALL\n");
+			break;
+		case 4:
+			bfm_set_boot_stage(KERNEL_SUBSYS_INITCALL);
+			pr_info("Boot_monitor set stage:KERNEL_SUBSYS_INITCALL\n");
+			break;
+		case 5:
+			bfm_set_boot_stage(KERNEL_FS_INITCALL);
+			pr_info("Boot_monitor set stage:KERNEL_FS_INITCALL\n");
+			break;
+		case 6:
+			bfm_set_boot_stage(KERNEL_DEVICE_INITCALL);
+			pr_info("Boot_monitor set stage:KERNEL_DEVICE_INITCALL\n");
+			break;
+		case 7:
+			bfm_set_boot_stage(KERNEL_LATE_INITCALL);
+			pr_info("Boot_monitor set stage:KERNEL_LATE_INITCALL\n");
+			break;
+		default:
+			pr_info("level is out of range ,no need set boot stage.\n");
+			break;
+	}
+/* AR0009CRQN yuanshuai 20170919 end */    
 
 	strcpy(initcall_command_line, saved_command_line);
 	parse_args(initcall_level_names[level],
@@ -934,6 +1022,7 @@ static int try_to_run_init_process(const char *init_filename)
 
 static noinline void __init kernel_init_freeable(void);
 
+
 #ifdef CONFIG_DEBUG_RODATA
 static bool rodata_enabled = true;
 static int __init set_debug_rodata(char *str)
@@ -969,6 +1058,12 @@ static int __ref kernel_init(void *unused)
 	numa_default_policy();
 
 	flush_delayed_fput();
+
+/* AR0009CRQN yuanshuai 20170919 begin */
+	#ifdef CONFIG_HUAWEI_BOOT_TIME
+    log_boot("Kernel_init_done");
+	#endif
+/* AR0009CRQN yuanshuai 20170919 end */    
 
 	if (ramdisk_execute_command) {
 		ret = run_init_process(ramdisk_execute_command);

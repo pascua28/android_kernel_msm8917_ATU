@@ -85,6 +85,9 @@
 #include <linux/crypto.h>
 #include <linux/scatterlist.h>
 
+#ifdef CONFIG_HW_WIFIPRO
+#include <hwnet/ipv4/wifipro_tcp_monitor.h>
+#endif
 int sysctl_tcp_tw_reuse __read_mostly;
 int sysctl_tcp_low_latency __read_mostly;
 EXPORT_SYMBOL(sysctl_tcp_low_latency);
@@ -1695,6 +1698,10 @@ process:
 	skb->dev = NULL;
 
 	bh_lock_sock_nested(sk);
+
+#ifdef CONFIG_HW_WIFIPRO
+	wifipro_update_tcp_statistics(WIFIPRO_TCP_MIB_INSEGS, skb, sk);
+#endif
 	ret = 0;
 	if (!sock_owned_by_user(sk)) {
 		if (!tcp_prequeue(sk, skb))

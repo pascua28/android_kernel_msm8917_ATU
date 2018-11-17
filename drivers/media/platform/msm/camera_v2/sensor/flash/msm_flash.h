@@ -34,6 +34,7 @@ enum msm_camera_flash_state_t {
 };
 
 struct msm_flash_ctrl_t;
+struct i2c_flash_info_t;
 
 struct msm_flash_func_t {
 	int32_t (*camera_flash_init)(struct msm_flash_ctrl_t *,
@@ -44,6 +45,10 @@ struct msm_flash_func_t {
 	int32_t (*camera_flash_low)(struct msm_flash_ctrl_t *,
 		struct msm_flash_cfg_data_t *);
 	int32_t (*camera_flash_high)(struct msm_flash_ctrl_t *,
+		struct msm_flash_cfg_data_t *);
+	int32_t (*camera_flash_match_id)(struct msm_flash_ctrl_t *,
+		struct i2c_flash_info_t*);
+	int32_t (*camera_flash_torch)(struct msm_flash_ctrl_t *,
 		struct msm_flash_cfg_data_t *);
 };
 
@@ -98,6 +103,18 @@ struct msm_flash_ctrl_t {
 
 	/* flash state */
 	enum msm_camera_flash_state_t flash_state;
+	int32_t last_flash_current;
+};
+
+struct i2c_flash_info_t{
+	char name[20];
+	uint16_t slave_addr;
+	enum msm_camera_i2c_reg_addr_type addr_type;
+	uint16_t id_reg;
+	uint16_t expect_id;
+	uint16_t id_mask;
+	uint16_t max_current;
+	enum msm_flash_driver_type flash_driver_type;
 };
 
 int msm_flash_i2c_probe(struct i2c_client *client,

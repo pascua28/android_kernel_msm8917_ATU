@@ -1021,11 +1021,9 @@ ep0_read (struct file *fd, char __user *buf, size_t len, loff_t *ptr)
 			struct usb_request	*req = dev->req;
 
 			if ((retval = setup_req (ep, req, 0)) == 0) {
-				++dev->udc_usage;
 				spin_unlock_irq (&dev->lock);
 				retval = usb_ep_queue (ep, req, GFP_KERNEL);
 				spin_lock_irq (&dev->lock);
-				--dev->udc_usage;
 			}
 			dev->state = STATE_DEV_CONNECTED;
 
@@ -1575,12 +1573,10 @@ delegate:
 				if (value < 0)
 					break;
 
-				++dev->udc_usage;
 				spin_unlock (&dev->lock);
 				value = usb_ep_queue (gadget->ep0, dev->req,
 							GFP_KERNEL);
 				spin_lock (&dev->lock);
-				--dev->udc_usage;
 				if (value < 0) {
 					clean_req (gadget->ep0, dev->req);
 					break;
@@ -1604,12 +1600,8 @@ delegate:
 		req->length = value;
 		req->zero = value < w_length;
 
-		++dev->udc_usage;
 		spin_unlock (&dev->lock);
 		value = usb_ep_queue (gadget->ep0, req, GFP_KERNEL);
-		spin_lock(&dev->lock);
-		--dev->udc_usage;
-		spin_unlock(&dev->lock);
 		if (value < 0) {
 			DBG (dev, "ep_queue --> %d\n", value);
 			req->status = 0;

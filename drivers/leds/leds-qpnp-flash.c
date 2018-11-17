@@ -261,12 +261,89 @@ struct qpnp_flash_led {
 	bool				strobe_debug;
 	bool				dbg_feature_en;
 	bool				open_fault;
+	bool				open_fault_led0; //led0 open fault mark
+	bool				open_fault_led1; //led1 open fault mark
 };
 
 static u8 qpnp_flash_led_ctrl_dbg_regs[] = {
 	0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48,
 	0x4A, 0x4B, 0x4C, 0x4F, 0x51, 0x52, 0x54, 0x55, 0x5A, 0x5C, 0x5D,
 };
+enum flash_charge_status{
+	CHG_CHANGED = 0,
+	CHG_UNCHANGED,
+	CHG_INVALID,
+};
+
+static enum
+flash_charge_status qpnp_flash_led_disable_charge(struct power_supply *battery_psy)
+{
+	union power_supply_propval psy_prop = {0,};
+	enum flash_charge_status chg_status = CHG_INVALID;
+	int rc = -EINVAL;
+
+	pr_info("%s, enter\n", __func__);
+
+	if( NULL == battery_psy ){
+		pr_err("%s, NULL ptr\n", __func__);
+		return CHG_INVALID;
+	}
+	/*1st check the current charging status*/
+	rc = battery_psy->get_property(battery_psy,
+		POWER_SUPPLY_PROP_STATUS,
+		&psy_prop);
+	if (rc < 0 || psy_prop.intval < 0) {
+		pr_err("%s, Invalid battery status: rc = %d, intval=%d\n", __func__, rc, psy_prop.intval);
+		return CHG_INVALID;
+	}
+	/*2nd if it's not charging, do nothing*/
+	if ( POWER_SUPPLY_STATUS_CHARGING != psy_prop.intval ){
+		pr_info("%s, not in charging status.  psy_prop.intval: %d\n", __func__,  psy_prop.intval);
+		return CHG_UNCHANGED;
+	}
+	/*3rd if it's charging, disable charge*/
+	psy_prop.intval = false;
+	if( battery_psy->set_property(battery_psy,
+		POWER_SUPPLY_PROP_CHARGING_ENABLED,
+		&psy_prop)){
+		pr_err("%s, Failed to disable charge\n", __func__);
+		chg_status = CHG_INVALID;
+	} else {
+		pr_info("%s, disable charge succ\n", __func__);
+		chg_status = CHG_CHANGED;
+	}
+
+	pr_info("%s, exit\n", __func__);
+	return chg_status;
+}
+
+static void qpnp_flash_led_enable_charge(struct power_supply *battery_psy,  enum flash_charge_status chg_status)
+{
+	union power_supply_propval psy_prop = {0,};
+
+	pr_info("%s, %d enter\n", __func__, __LINE__);
+
+	if( chg_status != CHG_CHANGED ){
+		pr_info("no need enable charge. chg_status:%d\n", CHG_CHANGED);
+		return;
+	}
+
+	if( NULL == battery_psy ){
+		pr_err("%s, NULL ptr\n", __func__);
+		return;
+	}
+
+	psy_prop.intval = true;
+	if( battery_psy->set_property(battery_psy,
+		POWER_SUPPLY_PROP_CHARGING_ENABLED,
+		&psy_prop)){
+		pr_err("%s, Failed to enable charge\n", __func__);
+	}
+
+	pr_info("%s, %d exit\n", __func__, __LINE__);
+
+	return;
+}
 
 static int flash_led_dbgfs_file_open(struct qpnp_flash_led *led,
 					struct file *file)
@@ -1308,6 +1385,7 @@ static void qpnp_flash_led_work(struct work_struct *work)
 	int total_curr_ma = 0;
 	int i;
 	u8 val;
+	enum flash_charge_status chg_status =  CHG_INVALID;
 
 	/* Global lock is to synchronize between the flash leds and torch */
 	mutex_lock(&led->flash_led_lock);
@@ -1318,7 +1396,9 @@ static void qpnp_flash_led_work(struct work_struct *work)
 	if (!brightness)
 		goto turn_off;
 
-	if (led->open_fault) {
+	/*check the led0/led1 fault state*/
+	if (((led->open_fault_led0)&&(flash_node->id==FLASH_LED_0))||
+		((led->open_fault_led1)&&(flash_node->id==FLASH_LED_1))) {
 		dev_err(&led->spmi_dev->dev, "Open fault detected\n");
 		goto unlock_mutex;
 	}
@@ -1671,17 +1751,20 @@ static void qpnp_flash_led_work(struct work_struct *work)
 		}
 
 		if (!led->charging_enabled) {
+			chg_status = qpnp_flash_led_disable_charge(led->battery_psy);
 			rc = qpnp_led_masked_write(led->spmi_dev,
 				FLASH_MODULE_ENABLE_CTRL(led->base),
 				FLASH_MODULE_ENABLE, FLASH_MODULE_ENABLE);
 			if (rc) {
 				dev_err(&led->spmi_dev->dev,
 					"Module enable reg write failed\n");
+				 qpnp_flash_led_enable_charge(led->battery_psy, chg_status);
 				goto exit_flash_led_work;
 			}
 
 			usleep_range(FLASH_RAMP_UP_DELAY_US_MIN,
 						FLASH_RAMP_UP_DELAY_US_MAX);
+			qpnp_flash_led_enable_charge(led->battery_psy, chg_status);
 		}
 
 		if (led->revid_data->pmic_subtype == PMI8996_SUBTYPE &&
@@ -1805,6 +1888,10 @@ turn_off:
 		}
 
 		led->open_fault |= (val & FLASH_LED_OPEN_FAULT_DETECTED);
+
+		/*register "0x0001D308 FLASH1_LED_FAULT_STATUS" led0 use bits 1, led1 use bits 3*/
+		led->open_fault_led0 |= (val & 0x4);
+		led->open_fault_led1 |= (val & 0x8);
 	}
 
 	rc = qpnp_led_masked_write(led->spmi_dev,

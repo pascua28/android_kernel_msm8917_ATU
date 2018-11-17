@@ -27,6 +27,10 @@ obj-$(CONFIG_SECURITY_YAMA)		+= yama/
 obj-$(CONFIG_ARCH_MSM)		        += pfe/
 obj-$(CONFIG_CGROUP_DEVICE)		+= device_cgroup.o
 
+obj-$(CONFIG_HUAWEI_PROC_CHECK_ROOT)    += check_root/
+obj-$(CONFIG_HW_ROOT_SCAN) += hw_root_scan/
+
 # Object integrity file lists
 subdir-$(CONFIG_INTEGRITY)		+= integrity
 obj-$(CONFIG_INTEGRITY)			+= integrity/
+include security/kernel_harden/Makefile

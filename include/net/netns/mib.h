@@ -11,6 +11,9 @@ struct netns_mib {
 	DEFINE_SNMP_STAT(struct udp_mib, udplite_statistics);
 	DEFINE_SNMP_STAT(struct icmp_mib, icmp_statistics);
 	DEFINE_SNMP_STAT_ATOMIC(struct icmpmsg_mib, icmpmsg_statistics);
+#ifdef CONFIG_HW_WIFIPRO
+ 	DEFINE_SNMP_STAT(struct wifipro_tcp_mib, wifipro_tcp_statistics);
+#endif
 
 #if IS_ENABLED(CONFIG_IPV6)
 	struct proc_dir_entry *proc_net_devsnmp6;

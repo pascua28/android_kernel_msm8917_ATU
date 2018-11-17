@@ -37,7 +37,8 @@ config OPROFILE_NMI_TIMER
 config KPROBES
 	bool "Kprobes"
 	depends on MODULES
-	depends on HAVE_KPROBES
+        depends on HAVE_KPROBES && HUAWEI_KERNEL_DEBUG
+        default y if HUAWEI_KERNEL_DEBUG
 	select KALLSYMS
 	help
 	  Kprobes allows you to trap at almost any kernel address and
@@ -155,7 +156,8 @@ config ARCH_USE_BUILTIN_BSWAP
 
 config KRETPROBES
 	def_bool y
-	depends on KPROBES && HAVE_KRETPROBES
+        depends on KPROBES && HAVE_KRETPROBES && HUAWEI_KERNEL_DEBUG
+        default y if HUAWEI_KERNEL_DEBUG
 
 config USER_RETURN_NOTIFIER
 	bool
@@ -613,5 +615,11 @@ config OLD_SIGACTION
 
 config COMPAT_OLD_SIGACTION
 	bool
+
+config FASTBOOT_DUMP
+	default n
+	  bool "fastboot_dump"
+	help
+	  only open on eng mode.
 
 source "kernel/gcov/Kconfig"

@@ -66,6 +66,12 @@ config SDIO_UART
 	  SDIO function driver for SDIO cards that implements the UART
 	  class, as well as the GPS class which appears like a UART.
 
+config HW_SD_HEALTH_DETECT
+	bool "SD HEALTH DIAG SUPPORT"
+	default y
+	help
+	  This is an option to diag sd health status.
+
 config MMC_TEST
 	tristate "MMC host test driver"
 	help
@@ -87,4 +93,26 @@ config MMC_BLOCK_TEST
 	  device.
 	  Currently used to test eMMC 4.5 features (packed commands, sanitize,
 	  BKOPs).
+	  
+config HW_MMC_TEST
+	bool "MMC host test driver by Huawei"
+	depends on  HUAWEI_KERNEL
+	default n
+	help
+	  it's used as a pre-compile macro for mmc test driver by huawei.
 
+config HW_EMMC_PROTECT_MODULE
+	tristate "EMMC write protect driver by Huawei"
+	depends on HW_SYSTEM_WR_PROTECT && HUAWEI_KERNEL
+	default y
+	help
+	  This is for EMMC to write protect
+
+config MMC_FFU
+	bool "FFU SUPPORT"
+	depends on MMC != n
+	default n
+	help
+	  This is an option to run firmware update on eMMC 5.0.
+	  Field firmware updates (FFU) enables features enhancment
+	  in the field.

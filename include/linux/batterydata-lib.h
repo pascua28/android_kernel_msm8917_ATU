@@ -14,6 +14,7 @@
 #define __BMS_BATTERYDATA_H
 
 #include <linux/errno.h>
+#include <linux/qpnp/qpnp-adc.h>
 
 #define FCC_CC_COLS		5
 #define FCC_TEMP_COLS		8
@@ -37,6 +38,18 @@ struct single_row_lut {
 	int y[MAX_SINGLE_LUT_COLS];
 	int cols;
 };
+struct cw_batt_data {
+	int model_data[4][64];
+	int	nom_cap_uah;
+	const char		*battery_type;
+};
+
+int32_t of_batterydata_adc_map_temp_voltage(const struct qpnp_vadc_map_pt *pts,
+                        uint32_t table_size, int32_t input, int32_t *output);
+int of_batterydata_read_fgauge_data_cw(struct device_node *main_node,
+                        struct cw_batt_data* pbatt_data, int batt_id_uv);
+int of_batterydata_batt_kohm_cw(struct device_node *main_node,
+						int batt_id_uv);
 
 /**
  * struct sf_lut -

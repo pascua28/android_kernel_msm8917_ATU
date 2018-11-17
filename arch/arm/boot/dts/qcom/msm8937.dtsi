@@ -35,7 +35,7 @@
 					dev = "/dev/block/platform/soc/7824900.sdhci/by-name/vendor";
 					type = "ext4";
 					mnt_flags = "ro,barrier=1,discard";
-					fsmgr_flags = "wait";
+					fsmgr_flags = "wait,verify";
 					status = "ok";
 				};
 				system {
@@ -43,10 +43,17 @@
 					dev = "/dev/block/platform/soc/7824900.sdhci/by-name/system";
 					type = "ext4";
 					mnt_flags = "ro,barrier=1,discard";
-					fsmgr_flags = "wait";
+					fsmgr_flags = "wait,verify";
 					status = "ok";
 				};
-
+				odm {
+					compatible = "android,odm";
+					dev = "/dev/block/platform/soc/7824900.sdhci/by-name/odm";
+					type = "ext4";
+					mnt_flags = "ro,nosuid,nodev,barrier=1";
+					fsmgr_flags = "wait,check,verify";
+					status = "ok";
+				};
 			};
 		};
 	};
@@ -65,7 +72,7 @@
 		modem_mem: modem_region@0 {
 			compatible = "removed-dma-pool";
 			no-map;
-			reg = <0x0 0x86800000 0x0 0x5000000>;
+			reg = <0x0 0x86800000 0x0 0x4D00000>;
 		};
 
 		adsp_fw_mem: adsp_fw_region@0 {
@@ -80,6 +87,11 @@
 			reg = <0x0 0x8c900000 0x0 0x700000>;
 		};
 
+		srecorder_mem: srecorder_region@0 {
+			compatible = "removed-dma-pool", "srecorder_mem";
+			no-map;
+			reg = <0x0 0x8f100000 0x0 0x400000>;
+		};
 
 		venus_mem: venus_region@0 {
 			compatible = "shared-dma-pool";
@@ -114,6 +126,49 @@
 			reg = <0x0 0x90000000 0x0 0x1400000>;
 		};
 
+		sahara_mem: sahara_region@0x92000000 {
+			compatible = "sahara_mem";
+			no-map;
+			reg = <0x0 0x92000000 0x0 0x0200000>;
+		};
+
+		hwlog_tz_mem: hwlog_tz_region@0 {
+			linux,reserve-contiguous-region;
+			linux,reserve-region;
+			linux,remove-completely;
+			no-map;
+			reg = <0x0 0x92200000 0x0 0x0100000>;
+			label = "hwlog_tz_mem";
+		};
+
+		tzapp_mem: tzapp_region@0 {
+			compatible = "removed-dma-pool";
+			no-map;
+			reg = <0x0 0x92300000 0x0 0x1900000>;
+			label = "tzapp_mem";
+		};
+
+		irqtrace_mem: irqtrace_region@0x93C00000 {
+			compatible = "irqtrace_mem";
+			no-map;
+			reg = <0x0 0x93C00000 0x0 0x0080000>;
+			status = "disabled";
+		};
+
+		tasktrace_mem: tasktrace_region@0x93C80000 {
+			compatible = "tasktrace_mem";
+			no-map;
+			reg = <0x0 0x93C80000 0x0 0x0080000>;
+			status = "disabled";
+		};
+
+		fastbootdump_mem: fastbootdump_region@0x93D00000 {
+			compatible = "fastbootdump_mem";
+			no-map;
+			reg = <0x0 0x93D00000 0x0 0x01400000>;
+			status = "disabled";
+		};
+		/*start<0x95100000> size<0x05000000> used for vfs region*/
 	};
 
 	aliases {
@@ -132,6 +187,8 @@
 		i2c2 = &i2c_2;
 		i2c5 = &i2c_5;
 		spi3 = &spi_3;
+		spi6 = &spi_6;
+		spi7 = &spi_7;
 		sdhc1 = &sdhc_1; /* SDC1 eMMC slot */
 		sdhc2 = &sdhc_2; /* SDC2 for SD card */
 		i2c3 = &i2c_3;
@@ -641,6 +698,52 @@
 		qcom,bam-consumer-pipe-index = <8>;
 		qcom,bam-producer-pipe-index = <9>;
 		qcom,master-id = <86>;
+		status = "disabled";
+	};
+
+	spi_6: spi@7AF6000 { /* BLSP2 QUP1 */
+		compatible = "qcom,spi-qup-v2";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg-names = "spi_physical", "spi_bam_physical";
+		reg = <0x7AF6000 0x600>,
+			<0x7AC4000 0x1F000>;
+		interrupt-names = "spi_irq", "spi_bam_irq";
+		interrupts = <0 300 0>, <0 239 0>;
+		spi-max-frequency = <19200000>;
+		clocks = <&clock_gcc clk_gcc_blsp2_ahb_clk>,
+			<&clock_gcc clk_gcc_blsp2_qup2_spi_apps_clk>;
+		clock-names = "iface_clk", "core_clk";
+		qcom,infinite-mode = <0>;
+		qcom,use-bam;
+		qcom,use-pinctrl;
+		qcom,ver-reg-exists;
+		qcom,bam-consumer-pipe-index = <6>;
+		qcom,bam-producer-pipe-index = <7>;
+		qcom,master-id = <84>;
+		status = "disabled";
+	};
+
+	spi_7: spi@7AF7000 { /* BLSP2 QUP2 */
+		compatible = "qcom,spi-qup-v2";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg-names = "spi_physical", "spi_bam_physical";
+		reg = <0x7AF7000 0x600>,
+			<0x7AC4000 0x1F000>;
+		interrupt-names = "spi_irq", "spi_bam_irq";
+		interrupts = <0 301 0>, <0 239 0>;
+		spi-max-frequency = <19200000>;
+		clocks = <&clock_gcc clk_gcc_blsp2_ahb_clk>,
+			<&clock_gcc clk_gcc_blsp2_qup3_spi_apps_clk>;
+		clock-names = "iface_clk", "core_clk";
+		qcom,infinite-mode = <0>;
+		qcom,use-bam;
+		qcom,use-pinctrl;
+		qcom,ver-reg-exists;
+		qcom,bam-consumer-pipe-index = <8>;
+		qcom,bam-producer-pipe-index = <9>;
+		qcom,master-id = <84>;
 		status = "disabled";
 	};
 
@@ -1214,7 +1317,7 @@
 		reg = <0xb017000 0x1000>;
 		reg-names = "wdt-base";
 		interrupts = <0 3 0>, <0 4 0>;
-		qcom,bark-time = <11000>;
+		qcom,bark-time = <15000>;
 		qcom,pet-time = <10000>;
 		qcom,ipi-ping;
 		qcom,wakeup-enable;
@@ -1265,6 +1368,25 @@
 			compatible = "qcom,msm-imem-pil";
 			reg = <0x94c 200>;
 		};
+                hw_reset_magic_addr@fe4 {
+                        compatible = "qcom,msm-imem-reset_magic_addr";
+                        reg = <0xfe4 4>;
+                };
+
+                srecorder_header@ae0 {
+                        compatible = "qcom,msm-imem-srecorder_header";
+                        reg = <0xae0 24>;
+                };
+
+		hw_tz_reset_reason_addr@7a4 {
+			compatible = "qcom,msm-imem-tz-reset-reason-addr";
+			reg = <0x7a4 4>;
+		};
+
+                hw_cpuinfo_addr@7a8 {
+                        compatible = "qcom,msm-imem-cpuinfo-addr";
+                        reg = <0x7a8 8>;
+                };
 	};
 
 	jtag_fuse: jtagfuse@a601c {
@@ -1552,9 +1674,9 @@
 		qcom,ce-opp-freq = <100000000>;
 	};
 
-	qcom_seecom: qseecom@85b00000 {
+	qcom_seecom: qseecom@92300000 {
 		compatible = "qcom,qseecom";
-		reg = <0x85b00000 0x800000>;
+		reg = <0x92300000 0x1900000>;
 		reg-names = "secapp-region";
 		qcom,hlos-num-ce-hw-instances = <1>;
 		qcom,hlos-ce-hw-instance = <0>;
@@ -2050,6 +2172,14 @@
 	clocks = <&clock_gcc clk_gcc_oxili_gfx3d_clk>;
 	status = "okay";
 };
+
+
+/{
+         huawei_boot_time {
+                 compatible = "huawei,hw_boot_time_info";
+         };
+};
+
 
 /* GPU overrides */
 &msm_gpu {

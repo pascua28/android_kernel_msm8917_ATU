@@ -703,10 +703,6 @@ struct msm_vfe_common_subdev {
 	struct msm_vfe_common_dev_data *common_data;
 };
 
-struct isp_proc {
-	uint32_t  kernel_sofid;
-	uint32_t  vfeid;
-};
 
 struct vfe_device {
 	/* Driver private data */
@@ -789,6 +785,13 @@ struct vfe_device {
 	/* irq info */
 	uint32_t irq0_mask;
 	uint32_t irq1_mask;
+	uint32_t ignore_irq;
+
+	/* last received irq */
+	uint32_t irq_status0;
+	uint32_t irq_status1;
+	uint32_t ping_pong_status;
+
 	/* before halt irq info */
 	uint32_t recovery_irq0_mask;
 	uint32_t recovery_irq1_mask;

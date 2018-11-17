@@ -12,8 +12,9 @@
  */
 
 #include "msm8937-pinctrl.dtsi"
-#include "msm8937-camera-sensor-mtp.dtsi"
+/*#include "msm8937-camera-sensor-mtp.dtsi"*/
 
+/*
 &flash_led {
 	compatible = "qcom,qpnp-flash-led";
 	reg = <0xd300 0x100>;
@@ -22,6 +23,7 @@
 	pinctrl-1 = <&rear_flash_led_disable>;
 	qcom,follow-otst2-rb-disabled;
 };
+*/
 
 &wled {
 	qcom,cons-sync-write-delay-us = <1000>;
@@ -34,8 +36,8 @@
 		pinctrl-names = "tlmm_gpio_key_active","tlmm_gpio_key_suspend";
 		pinctrl-0 = <&gpio_key_active>;
 		pinctrl-1 = <&gpio_key_suspend>;
-
-		camera_focus {
+		/*delete these two keys for gpio128 is for leds*/
+		/*camera_focus {
 			label = "camera_focus";
 			gpios = <&tlmm 128 0x1>;
 			linux,input-type = <1>;
@@ -49,7 +51,7 @@
 			linux,input-type = <1>;
 			linux,code = <0x2fe>;
 			debounce-interval = <15>;
-		};
+		};*/
 
 		vol_up {
 			label = "volume_up";
@@ -77,7 +79,7 @@
 
 &pmi_haptic{
 	qcom,wave-play-rate-us = <4165>;
-	qcom,actuator-type = "lra";
+	qcom,actuator-type = "erm";
 	qcom,lra-auto-res-mode="qwd";
 	qcom,lra-high-z="opt1";
 	qcom,lra-res-cal-period = <4>;
@@ -108,30 +110,11 @@
 	};
 };
 
-&i2c_5 { /* BLSP2 QUP1 */
-	nq@28 {
-		compatible = "qcom,nq-nci";
-		reg = <0x28>;
-		qcom,nq-irq = <&tlmm 17 0x00>;
-		qcom,nq-ven = <&tlmm 16 0x00>;
-		qcom,nq-firm = <&tlmm 130 0x00>;
-		qcom,nq-clkreq = <&pm8937_gpios 5 0x00>;
-		interrupt-parent = <&tlmm>;
-		qcom,clk-src = "BBCLK2";
-		interrupts = <17 0>;
-		interrupt-names = "nfc_irq";
-		pinctrl-names = "nfc_active", "nfc_suspend";
-		pinctrl-0 = <&nfc_int_active &nfc_disable_active>;
-		pinctrl-1 = <&nfc_int_suspend &nfc_disable_suspend>;
-		clocks = <&clock_gcc clk_bb_clk2_pin>;
-		clock-names = "ref_clk";
-	};
-};
-
 &sdhc_1 {
 	/* device core power supply */
 	vdd-supply = <&pm8937_l8>;
-	qcom,vdd-voltage-level = <2900000 2900000>;
+	qcom,vdd-always-on;
+	qcom,vdd-voltage-level = <2950000 2950000>;
 	qcom,vdd-current-level = <200 570000>;
 
 	/* device communication power supply */
@@ -210,7 +193,8 @@
 };
 
 &mdss_dsi0 {
-	qcom,dsi-pref-prim-pan = <&dsi_truly_1080_vid>;
+	/*qcom,dsi-pref-prim-pan = <&dsi_truly_1080_vid>;*/
+	qcom,dsi-pref-prim-pan = <&dsi_boe_720p_vid>;
 	pinctrl-names = "mdss_default", "mdss_sleep";
 	pinctrl-0 = <&mdss_dsi_active &mdss_te_active>;
 	pinctrl-1 = <&mdss_dsi_suspend &mdss_te_suspend>;
@@ -223,7 +207,8 @@
 
 &mdss_dsi1 {
 	status = "disabled";
-	qcom,dsi-pref-prim-pan = <&dsi_truly_1080_vid>;
+	/*qcom,dsi-pref-prim-pan = <&dsi_truly_1080_vid>;*/
+	qcom,dsi-pref-prim-pan = <&dsi_boe_720p_vid>;
 	pinctrl-names = "mdss_default", "mdss_sleep";
 	pinctrl-0 = <&mdss_dsi_active &mdss_te_active>;
 	pinctrl-1 = <&mdss_dsi_suspend &mdss_te_suspend>;
@@ -253,6 +238,11 @@
 	qcom,mdss-dsi-pan-fps-update = "dfps_immediate_porch_mode_vfp";
 };
 
+&dsi_boe_720p_vid {
+	qcom,panel-supply-entries = <&dsi_panel_pwr_supply>;
+	/*qcom,mdss-dsi-pan-enable-dynamic-fps;
+	qcom,mdss-dsi-pan-fps-update = "dfps_immediate_porch_mode_vfp";*/
+};
 /* PM8937 GPIO configuration */
 &pm8937_gpios {
 	gpio@c100 {

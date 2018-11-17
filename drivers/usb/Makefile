@@ -62,3 +62,5 @@ obj-$(CONFIG_USB_GADGET)	+= gadget/
 obj-$(CONFIG_USB_COMMON)	+= common/
 
 obj-$(CONFIG_USBIP_CORE)	+= usbip/
+obj-y += otg_gpio_id/
+obj-y += otg_dual_role/

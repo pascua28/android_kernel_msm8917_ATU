@@ -26,6 +26,9 @@
 #include "mmc_ops.h"
 #include "sd_ops.h"
 
+#ifdef CONFIG_HUAWEI_EMMC_DSM
+#include <linux/mmc/dsm_emmc.h>
+#endif
 static const unsigned int tran_exp[] = {
 	10000,		100000,		1000000,	10000000,
 	0,		0,		0,		0
@@ -466,7 +469,12 @@ static int mmc_read_ext_csd(struct mmc_card *card, u8 *ext_csd)
 		card->ext_csd.part_config = ext_csd[EXT_CSD_PART_CONFIG];
 
 		/* EXT_CSD value is in units of 10ms, but we store in ms */
+		if(card->cid.manfid == CID_MANFID_HYNIX)
+			ext_csd[EXT_CSD_PART_SWITCH_TIME] = 0xA;
 		card->ext_csd.part_time = 10 * ext_csd[EXT_CSD_PART_SWITCH_TIME];
+		if (card->ext_csd.part_time &&
+			card->ext_csd.part_time < MMC_MIN_PART_SWITCH_TIME)
+				card->ext_csd.part_time = MMC_MIN_PART_SWITCH_TIME;
 
 		/* Sleep / awake timeout in 100ns units */
 		if (sa_shift > 0 && sa_shift <= 0x17)
@@ -631,6 +639,8 @@ static int mmc_read_ext_csd(struct mmc_card *card, u8 *ext_csd)
 	if (card->ext_csd.rev >= 6) {
 		card->ext_csd.feature_support |= MMC_DISCARD_FEATURE;
 
+		if(card->cid.manfid == CID_MANFID_HYNIX)
+			ext_csd[EXT_CSD_GENERIC_CMD6_TIME] = 0xA;
 		card->ext_csd.generic_cmd6_time = 10 *
 			ext_csd[EXT_CSD_GENERIC_CMD6_TIME];
 		card->ext_csd.power_off_longtime = 10 *
@@ -671,8 +681,10 @@ static int mmc_read_ext_csd(struct mmc_card *card, u8 *ext_csd)
 		 */
 		card->ext_csd.strobe_support = ext_csd[EXT_CSD_STROBE_SUPPORT];
 		card->ext_csd.cmdq_support = ext_csd[EXT_CSD_CMDQ_SUPPORT];
-		card->ext_csd.fw_version = ext_csd[EXT_CSD_FW_VERSION];
-		pr_info("%s: eMMC FW version: 0x%02x\n",
+
+		memcpy(&card->ext_csd.fw_version, &ext_csd[EXT_CSD_FW_VERSION], sizeof(card->ext_csd.fw_version));
+		card->ext_csd.fw_version = cpu_to_be64(card->ext_csd.fw_version);
+		pr_info("%s: eMMC FW version: 0x%016llx\n",
 			mmc_hostname(card->host),
 			card->ext_csd.fw_version);
 		if (card->ext_csd.cmdq_support) {
@@ -703,6 +715,9 @@ static int mmc_read_ext_csd(struct mmc_card *card, u8 *ext_csd)
 		card->ext_csd.barrier_support = 0;
 		card->ext_csd.cache_flush_policy = 0;
 	}
+#ifdef CONFIG_HUAWEI_EMMC_DSM
+	emmc_get_life_time(card, ext_csd);
+#endif
 
 	/* eMMC v5 or later */
 	if (card->ext_csd.rev >= 7) {
@@ -825,6 +840,7 @@ MMC_DEV_ATTR(raw_rpmb_size_mult, "%#x\n", card->ext_csd.raw_rpmb_size_mult);
 MMC_DEV_ATTR(enhanced_rpmb_supported, "%#x\n",
 		card->ext_csd.enhanced_rpmb_supported);
 MMC_DEV_ATTR(rel_sectors, "%#x\n", card->ext_csd.rel_sectors);
+MMC_DEV_ATTR(fw_version, "%016llx\n", card->ext_csd.fw_version);
 
 static struct attribute *mmc_std_attrs[] = {
 	&dev_attr_cid.attr,
@@ -847,6 +863,7 @@ static struct attribute *mmc_std_attrs[] = {
 	&dev_attr_raw_rpmb_size_mult.attr,
 	&dev_attr_enhanced_rpmb_supported.attr,
 	&dev_attr_rel_sectors.attr,
+	&dev_attr_fw_version.attr,
 	NULL,
 };
 ATTRIBUTE_GROUPS(mmc_std);
@@ -2107,6 +2124,9 @@ reinit:
 		}
 	}
 
+#ifdef CONFIG_HUAWEI_EMMC_DSM
+	emmc_life_time_dsm(card);
+#endif
 	return 0;
 
 free_card:
@@ -2204,7 +2224,7 @@ static int mmc_sleepawake(struct mmc_host *host, bool sleep)
 	return err;
 }
 
-static int mmc_can_poweroff_notify(const struct mmc_card *card)
+int mmc_can_poweroff_notify(const struct mmc_card *card)
 {
 	return card &&
 		mmc_card_mmc(card) &&
@@ -2537,7 +2557,7 @@ out:
 /*
  * Suspend callback
  */
-static int mmc_suspend(struct mmc_host *host)
+ int mmc_suspend(struct mmc_host *host)
 {
 	int err;
 	ktime_t start = ktime_get();
@@ -2806,6 +2826,10 @@ static const struct mmc_bus_ops mmc_ops = {
 	.power_restore = mmc_power_restore,
 	.alive = mmc_alive,
 	.change_bus_speed = mmc_change_bus_speed,
+#ifdef CONFIG_MMC_PASSWORDS
+	.sysfs_add = NULL,
+	.sysfs_remove = NULL,
+#endif
 	.shutdown = mmc_shutdown,
 };
 

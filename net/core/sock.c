@@ -1392,6 +1392,10 @@ struct sock *sk_alloc(struct net *net, int family, gfp_t priority,
 		sock_net_set(sk, get_net(net));
 		atomic_set(&sk->sk_wmem_alloc, 1);
 
+#ifdef CONFIG_HWDPI_MODULE
+		sk->sk_hwdpi_mark = 0;
+#endif
+
 		sock_update_classid(sk);
 		sock_update_netprioidx(sk);
 	}

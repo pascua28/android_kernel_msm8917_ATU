@@ -26,7 +26,9 @@
 #include <linux/msm-bus.h>
 #include <linux/dma-mapping.h>
 #include <linux/highmem.h>
-
+#ifdef CONFIG_FASTBOOT_DUMP
+#include <linux/fastboot_dump_reason_api.h>
+#endif
 #include <soc/qcom/subsystem_restart.h>
 #include <soc/qcom/ramdump.h>
 #include <soc/qcom/scm.h>
@@ -805,7 +807,26 @@ static void log_failure_reason(const struct pil_tz_data *d)
 
 	strlcpy(reason, smem_reason, min(size, MAX_SSR_REASON_LEN));
 	pr_err("%s subsystem failure reason: %s.\n", name, reason);
-
+#ifdef CONFIG_FASTBOOT_DUMP
+	fastboot_dump_m_reason_set(FD_M_SUBSYSTEM);
+	if(0==strcmp("adsp",name))
+	{
+		fastboot_dump_s_reason_set(FD_S_SUBSYSTEM_ADSP_CRASH);
+	}
+	else if(0==strcmp("wcnss",name))
+	{
+		fastboot_dump_s_reason_set(FD_S_SUBSYSTEM_WCNSS_CRASH);
+	}
+	else if(0==strcmp("venus",name))
+	{
+		fastboot_dump_s_reason_set(FD_S_SUBSYSTEM_VENUS_CRASH);
+	}
+	else
+	{
+		fastboot_dump_s_reason_set(FD_S_SUBSYSTEM_UNKOWN_CRASH);
+	}
+	fastboot_dump_s_reason_str_set_format("%s_crash",name);
+#endif
 	smem_reason[0] = '\0';
 	wmb();
 }

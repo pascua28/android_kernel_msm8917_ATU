@@ -15,6 +15,11 @@
 #include <linux/mmc/mmc.h>
 #include <linux/mod_devicetable.h>
 #include <linux/notifier.h>
+#ifdef CONFIG_HUAWEI_EMMC_DSM
+#define EXT_CSD_PRE_EOL_INFO_NORMAL     0x01
+#define EXT_CSD_PRE_EOL_INFO_WARNING     0x02
+#define EXT_CSD_PRE_EOL_INFO_URGENT     0x03
+#endif
 
 #define MMC_CARD_CMDQ_BLK_SIZE 512
 
@@ -106,7 +111,7 @@ struct mmc_ext_csd {
 	u8			raw_ext_csd_structure;	/* 194 */
 	u8			raw_card_type;		/* 196 */
 	u8			raw_drive_strength;	/* 197 */
-	u8			out_of_int_time;	/* 198 */
+	u16			out_of_int_time;	/* 198 */
 	u8			raw_pwr_cl_52_195;	/* 200 */
 	u8			raw_pwr_cl_26_195;	/* 201 */
 	u8			raw_pwr_cl_52_360;	/* 202 */
@@ -128,15 +133,17 @@ struct mmc_ext_csd {
 #define MMC_BKOPS_URGENCY_MASK 0x3
 	u8			raw_bkops_status;	/* 246 */
 	u8			raw_sectors[4];		/* 212 - 4 bytes */
+#ifdef CONFIG_HUAWEI_EMMC_DSM
+	u8			pre_eol_info;   /* 267 */
+	u8			device_life_time_est_typ_a;	/* 268 */
+	u8			device_life_time_est_typ_b;	/* 269 */
+#endif
 	u8			cmdq_depth;		/* 307 */
 	u8			cmdq_support;		/* 308 */
 	u8			barrier_support;	/* 486 */
 	u8			barrier_en;
-	u8			pre_eol_info;		/* 267 */
-	u8			device_life_time_est_typ_a;	/* 268 */
-	u8			device_life_time_est_typ_b;	/* 269 */
 
-	u8			fw_version;		/* 254 */
+	u64			fw_version;		/* 254 - 8 bytes */
 	unsigned int            feature_support;
 #define MMC_DISCARD_FEATURE	BIT(0)                  /* CMD38 feature */
 };
@@ -156,6 +163,7 @@ struct sd_ssr {
 	unsigned int		au;			/* In sectors */
 	unsigned int		erase_timeout;		/* In milliseconds */
 	unsigned int		erase_offset;		/* In milliseconds */
+	unsigned int		speed_class;
 };
 
 struct sd_switch_caps {
@@ -409,6 +417,12 @@ struct mmc_card {
 	struct sd_scr		scr;		/* extra SD information */
 	struct sd_ssr		ssr;		/* yet more SD information */
 	struct sd_switch_caps	sw_caps;	/* switch (CMD6) caps */
+	
+#ifdef CONFIG_MMC_PASSWORDS
+	bool swith_voltage; 			/* whether sdcard voltage swith to 1.8v  */
+	bool auto_unlock;
+	u8   unlock_pwd[20]; // 1(len) + max_pwd(16) + 0xFF 0xFF + 0 = 20
+#endif
 
 	unsigned int		sdio_funcs;	/* number of SDIO functions */
 	struct sdio_cccr	cccr;		/* common card info */

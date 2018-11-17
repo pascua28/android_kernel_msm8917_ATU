@@ -20,7 +20,7 @@
 #include "msm_cci.h"
 
 #undef CDBG
-#define CDBG(fmt, args...) pr_debug(fmt, ##args)
+#define CDBG(fmt, args...) pr_info(fmt, ##args)
 
 DEFINE_MSM_MUTEX(msm_flash_mutex);
 
@@ -599,6 +599,8 @@ static int32_t msm_flash_low(
 		if (flash_ctrl->flash_trigger[i])
 			led_trigger_event(flash_ctrl->flash_trigger[i], 0);
 
+	if(flash_ctrl->switch_trigger)
+		led_trigger_event(flash_ctrl->switch_trigger, 0);
 	/* Turn on flash triggers */
 	for (i = 0; i < flash_ctrl->torch_num_sources; i++) {
 		if (flash_ctrl->torch_trigger[i]) {
@@ -636,6 +638,8 @@ static int32_t msm_flash_high(
 		if (flash_ctrl->torch_trigger[i])
 			led_trigger_event(flash_ctrl->torch_trigger[i], 0);
 
+	if (flash_ctrl->switch_trigger)
+		led_trigger_event(flash_ctrl->switch_trigger, 0);
 	/* Turn on flash triggers */
 	for (i = 0; i < flash_ctrl->flash_num_sources; i++) {
 		if (flash_ctrl->flash_trigger[i]) {

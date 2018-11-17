@@ -82,17 +82,95 @@ out:
 	return res;
 }
 
-static int validate_user_key(struct fscrypt_info *crypt_info,
-			struct fscrypt_context *ctx, u8 *raw_key,
-			const char *prefix, int min_keysize)
+int fscrypt_set_gcm_key(struct crypto_aead *tfm,
+			u8 deriving_key[FS_AES_256_GCM_KEY_SIZE])
+{
+	int res = 0;
+	unsigned int iv_len;
+
+	crypto_aead_set_flags(tfm, CRYPTO_TFM_REQ_WEAK_KEY);
+
+	iv_len = crypto_aead_ivsize(tfm);
+	if (iv_len > FS_KEY_DERIVATION_IV_SIZE) {
+		res = -EINVAL;
+		pr_err("fscrypt %s : IV length is incompatible\n", __func__);
+		goto out;
+	}
+
+	res = crypto_aead_setauthsize(tfm, FS_KEY_DERIVATION_TAG_SIZE);
+	if (res < 0) {
+		pr_err("fscrypt %s : Failed to set authsize\n", __func__);
+		goto out;
+	}
+
+	res = crypto_aead_setkey(tfm, deriving_key,
+					FS_AES_256_GCM_KEY_SIZE);
+	if (res < 0)
+		pr_err("fscrypt %s : Failed to set deriving key\n", __func__);
+out:
+	return res;
+}
+
+int fscrypt_derive_gcm_key(struct crypto_aead *tfm,
+				u8 source_key[FS_KEY_DERIVATION_CIPHER_SIZE],
+				u8 derived_key[FS_KEY_DERIVATION_CIPHER_SIZE],
+				u8 iv[FS_KEY_DERIVATION_IV_SIZE],
+				int enc)
+{
+	int res = 0;
+	struct aead_request *req = NULL;
+	DECLARE_FS_COMPLETION_RESULT(ecr);
+	struct scatterlist src_sg, dst_sg;
+	unsigned int ilen;
+
+	if (!tfm) {
+		res = -EINVAL;
+		goto out;
+	}
+
+	if (IS_ERR(tfm)) {
+		res = PTR_ERR(tfm);
+		goto out;
+	}
+
+	req = aead_request_alloc(tfm, GFP_NOFS);
+	if (!req) {
+		res = -ENOMEM;
+		goto out;
+	}
+
+	aead_request_set_callback(req,
+			CRYPTO_TFM_REQ_MAY_BACKLOG | CRYPTO_TFM_REQ_MAY_SLEEP,
+			derive_crypt_complete, &ecr);
+
+	ilen = enc ? FS_KEY_DERIVATION_NONCE_SIZE :
+			FS_KEY_DERIVATION_CIPHER_SIZE;
+
+	sg_init_one(&src_sg, source_key, FS_KEY_DERIVATION_CIPHER_SIZE);
+	sg_init_one(&dst_sg, derived_key, FS_KEY_DERIVATION_CIPHER_SIZE);
+
+	aead_request_set_ad(req, 0);
+
+	aead_request_set_crypt(req, &src_sg, &dst_sg, ilen, iv);
+
+	res = enc ? crypto_aead_encrypt(req) : crypto_aead_decrypt(req);
+	if (res == -EINPROGRESS || res == -EBUSY) {
+		wait_for_completion(&ecr.completion);
+		res = ecr.res;
+	}
+
+out:
+	if (req)
+		aead_request_free(req);
+	return res;
+}
+
+struct key *fscrypt_request_key(u8 *descriptor, u8 *prefix,
+				int prefix_size)
 {
 	char *description;
 	struct key *keyring_key;
-	struct fscrypt_key *master_key;
-	const struct user_key_payload *ukp;
-	int prefix_size = strlen(prefix);
 	int full_key_len = prefix_size + (FS_KEY_DESCRIPTOR_SIZE * 2) + 1;
-	int res;
 
 	/* FIXME: 3.18 causes kernel panic.
 	description = kasprintf(GFP_NOFS, "%s%*phN", prefix,
@@ -101,16 +179,34 @@ static int validate_user_key(struct fscrypt_info *crypt_info,
 	*/
 	description = kmalloc(full_key_len, GFP_NOFS);
 	if (!description)
-		return -ENOMEM;
+		return (struct key *)ERR_PTR(-ENOMEM);
 
 	memcpy(description, prefix, prefix_size);
 	sprintf(description + prefix_size,
 			"%*phN", FS_KEY_DESCRIPTOR_SIZE,
-			ctx->master_key_descriptor);
+			descriptor);
 	description[full_key_len - 1] = '\0';
 
 	keyring_key = request_key(&key_type_logon, description, NULL);
 	kfree(description);
+
+	return keyring_key;
+}
+
+static int validate_user_key(struct fscrypt_info *crypt_info,
+			struct fscrypt_context *ctx, u8 *raw_key,
+			const char *prefix, int min_keysize)
+{
+	struct key *keyring_key;
+	struct fscrypt_key *master_key;
+	const struct user_key_payload *ukp;
+	int prefix_size = strlen(prefix);
+	int res;
+	u8 plain_text[FS_KEY_DERIVATION_CIPHER_SIZE] = {0};
+	struct crypto_aead *tfm = NULL;
+
+	keyring_key = fscrypt_request_key(ctx->master_key_descriptor,
+				prefix, prefix_size);
 	if (IS_ERR(keyring_key))
 		return PTR_ERR(keyring_key);
 	down_read(&keyring_key->sem);
@@ -127,9 +223,12 @@ static int validate_user_key(struct fscrypt_info *crypt_info,
 		goto out;
 	}
 	master_key = (struct fscrypt_key *)ukp->data;
-	BUILD_BUG_ON(FS_AES_128_ECB_KEY_SIZE != FS_KEY_DERIVATION_NONCE_SIZE);
+	BUILD_BUG_ON(FS_AES_256_XTS_KEY_SIZE != FS_KEY_DERIVATION_NONCE_SIZE);
 
-	if (master_key->size < min_keysize || master_key->size > FS_MAX_KEY_SIZE
+	//force the size equal to FS_AES_256_GCM_KEY_SIZE since user space might pass FS_AES_256_XTS_KEY_SIZE
+	master_key->size = FS_AES_256_GCM_KEY_SIZE;
+	if (master_key->size != FS_AES_256_GCM_KEY_SIZE ||
+	    master_key->size > FS_MAX_KEY_SIZE
 	    || master_key->size % AES_BLOCK_SIZE != 0) {
 		printk_once(KERN_WARNING
 				"%s: key size incorrect: %d\n",
@@ -137,8 +236,31 @@ static int validate_user_key(struct fscrypt_info *crypt_info,
 		res = -ENOKEY;
 		goto out;
 	}
-	res = derive_key_aes(ctx->nonce, master_key, raw_key);
+	tfm = (struct crypto_aead *)crypto_alloc_aead("gcm(aes)", 0, 0);
+	if (IS_ERR(tfm)) {
+		up_read(&keyring_key->sem);
+		res = (int)PTR_ERR(tfm);
+		tfm = NULL;
+		pr_err("fscrypt %s : tfm allocation failed!\n", __func__);
+		goto out;
+	}
+
+	res = fscrypt_set_gcm_key(tfm, master_key->raw);
+	if (res)
+		goto out;
+	res = fscrypt_derive_gcm_key(tfm, ctx->nonce, plain_text, ctx->iv, 0);
+	if (res)
+		goto out;
+
+	memcpy(raw_key, plain_text, FS_KEY_DERIVATION_NONCE_SIZE);
+
+	crypt_info->ci_gtfm = tfm;
+	up_read(&keyring_key->sem);
+	key_put(keyring_key);
+	return 0;
 out:
+	if (tfm)
+		crypto_free_aead(tfm);
 	up_read(&keyring_key->sem);
 	key_put(keyring_key);
 	return res;
@@ -191,6 +313,8 @@ static void put_crypt_info(struct fscrypt_info *ci)
 		return;
 
 	crypto_free_ablkcipher(ci->ci_ctfm);
+	if (ci->ci_gtfm)
+		crypto_free_aead(ci->ci_gtfm);
 	crypto_free_cipher(ci->ci_essiv_tfm);
 	kmem_cache_free(fscrypt_info_cachep, ci);
 }
@@ -285,7 +409,7 @@ int fscrypt_get_encryption_info(struct inode *inode)
 			return res;
 		/* Fake up a context for an unencrypted directory */
 		memset(&ctx, 0, sizeof(ctx));
-		ctx.format = FS_ENCRYPTION_CONTEXT_FORMAT_V1;
+		ctx.format = FS_ENCRYPTION_CONTEXT_FORMAT_V2;
 		ctx.contents_encryption_mode = FS_ENCRYPTION_MODE_AES_256_XTS;
 		ctx.filenames_encryption_mode = FS_ENCRYPTION_MODE_AES_256_CTS;
 		memset(ctx.master_key_descriptor, 0x42, FS_KEY_DESCRIPTOR_SIZE);
@@ -293,7 +417,7 @@ int fscrypt_get_encryption_info(struct inode *inode)
 		return -EINVAL;
 	}
 
-	if (ctx.format != FS_ENCRYPTION_CONTEXT_FORMAT_V1)
+	if (ctx.format != FS_ENCRYPTION_CONTEXT_FORMAT_V2)
 		return -EINVAL;
 
 	if (ctx.flags & ~FS_POLICY_FLAGS_VALID)
@@ -307,6 +431,7 @@ int fscrypt_get_encryption_info(struct inode *inode)
 	crypt_info->ci_data_mode = ctx.contents_encryption_mode;
 	crypt_info->ci_filename_mode = ctx.filenames_encryption_mode;
 	crypt_info->ci_ctfm = NULL;
+	crypt_info->ci_gtfm = NULL;
 	crypt_info->ci_essiv_tfm = NULL;
 	memcpy(crypt_info->ci_master_key, ctx.master_key_descriptor,
 				sizeof(crypt_info->ci_master_key));

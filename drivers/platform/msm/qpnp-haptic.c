@@ -2385,6 +2385,7 @@ static int qpnp_hap_parse_dt(struct qpnp_hap *hap)
 			"qcom,vmax-mv", &temp);
 	if (!rc) {
 		hap->vmax_mv = temp;
+        dev_err(&spmi->dev, "[vibrator] read vmax:%d\n", hap->vmax_mv);
 	} else if (rc != -EINVAL) {
 		dev_err(&spmi->dev, "Unable to read vmax\n");
 		return rc;

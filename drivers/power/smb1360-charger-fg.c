@@ -313,6 +313,7 @@ enum wakeup_src {
 	WAKEUP_SRC_MIN_SOC,
 	WAKEUP_SRC_EMPTY_SOC,
 	WAKEUP_SRC_JEITA_HYSTERSIS,
+	WAKEUP_SRC_CHARGING_CHECK,
 	WAKEUP_SRC_MAX,
 };
 #define WAKEUP_SRC_MASK (~(~0 << WAKEUP_SRC_MAX))
@@ -454,6 +455,9 @@ struct smb1360_chip {
 	struct work_struct		jeita_hysteresis_work;
 	int				cold_hysteresis;
 	int				hot_hysteresis;
+#ifdef CONFIG_HUAWEI_USB
+	bool			release_wakelock_flag;
+#endif
 };
 
 static int chg_time[] = {
@@ -472,6 +476,9 @@ static int fastchg_current[] = {
 	450, 600, 750, 900, 1050, 1200, 1350, 1500,
 };
 
+#ifdef CONFIG_HUAWEI_USB
+#include "hw_rt_deep_sleep_smb1360_charger_fg.c"
+#endif
 static void smb1360_stay_awake(struct smb1360_wakeup_source *source,
 	enum wakeup_src wk_src)
 {
@@ -1912,6 +1919,11 @@ static int smb1360_battery_set_property(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_SYSTEM_TEMP_LEVEL:
 		smb1360_system_temp_level_set(chip, val->intval);
 		break;
+	#ifdef CONFIG_HUAWEI_USB
+	case POWER_SUPPLY_PROP_RELEASE_WAKELOCK:
+		smb1360_release_wakelock(chip, val->intval);
+		break;
+	#endif
 	default:
 		return -EINVAL;
 	}

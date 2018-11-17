@@ -43,6 +43,9 @@
 #include <linux/sched/rt.h>
 #include <linux/coresight-stm.h>
 
+#include <linux/vmalloc.h>
+#include <linux/mm.h>
+
 #include "trace.h"
 #include "trace_output.h"
 
@@ -1355,13 +1358,15 @@ static int trace_create_savedcmd(void)
 {
 	int ret;
 
-	savedcmd = kmalloc(sizeof(*savedcmd), GFP_KERNEL);
+//	savedcmd = kmalloc(sizeof(*savedcmd), GFP_KERNEL);
+	savedcmd = vmalloc(sizeof(*savedcmd));
 	if (!savedcmd)
 		return -ENOMEM;
 
 	ret = allocate_cmdlines_buffer(SAVED_CMDLINES_DEFAULT, savedcmd);
 	if (ret < 0) {
-		kfree(savedcmd);
+//		kfree(savedcmd);
+		kvfree(savedcmd);
 		savedcmd = NULL;
 		return -ENOMEM;
 	}
@@ -3918,19 +3923,22 @@ static void free_saved_cmdlines_buffer(struct saved_cmdlines_buffer *s)
 	kfree(s->saved_cmdlines);
 	kfree(s->map_cmdline_to_pid);
 	kfree(s->map_cmdline_to_tgid);
-	kfree(s);
+	//kfree(s);
+	kvfree(s);
 }
 
 static int tracing_resize_saved_cmdlines(unsigned int val)
 {
 	struct saved_cmdlines_buffer *s, *savedcmd_temp;
 
-	s = kmalloc(sizeof(*s), GFP_KERNEL);
+//	s = kmalloc(sizeof(*s), GFP_KERNEL);
+	s = vmalloc(sizeof(*s));
 	if (!s)
 		return -ENOMEM;
 
 	if (allocate_cmdlines_buffer(val, s) < 0) {
-		kfree(s);
+//		kfree(s);
+		kvfree(s);
 		return -ENOMEM;
 	}
 

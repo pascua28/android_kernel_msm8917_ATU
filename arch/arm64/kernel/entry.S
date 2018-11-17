@@ -328,7 +328,7 @@ tsk	.req	x28		// current thread_info
 /*
  * Exception vectors.
  */
-
+	.pushsection ".entry.text", "ax"
 	.align	11
 ENTRY(vectors)
 	kernel_ventry	1, sync_invalid			// Synchronous EL1t
@@ -1067,3 +1067,4 @@ ENTRY(sys_rt_sigreturn_wrapper)
 	mov	x0, sp
 	b	sys_rt_sigreturn
 ENDPROC(sys_rt_sigreturn_wrapper)
+.popsection

@@ -41,7 +41,6 @@ extern void *proc_get_parent_data(const struct inode *);
 extern void proc_remove(struct proc_dir_entry *);
 extern void remove_proc_entry(const char *, struct proc_dir_entry *);
 extern int remove_proc_subtree(const char *, struct proc_dir_entry *);
-
 #else /* CONFIG_PROC_FS */
 
 static inline void proc_root_init(void)

@@ -52,6 +52,10 @@
 
 #include "workqueue_internal.h"
 
+#ifdef CONFIG_HUAWEI_DUBAI
+#include <linux/dubai.h>
+#endif
+
 enum {
 	/*
 	 * worker_pool flags
@@ -1970,6 +1974,9 @@ __acquires(&pool->lock)
 	bool cpu_intensive = pwq->wq->flags & WQ_CPU_INTENSIVE;
 	int work_color;
 	struct worker *collision;
+#ifdef CONFIG_HUAWEI_DUBAI
+	u64 uptime;
+#endif
 #ifdef CONFIG_LOCKDEP
 	/*
 	 * It is permissible to free the struct work_struct from
@@ -2040,7 +2047,13 @@ __acquires(&pool->lock)
 	lock_map_acquire_read(&pwq->wq->lockdep_map);
 	lock_map_acquire(&lockdep_map);
 	trace_workqueue_execute_start(work);
+#ifdef CONFIG_HUAWEI_DUBAI
+	uptime = ktime_get_ns();
+#endif
 	worker->current_func(work);
+#ifdef CONFIG_HUAWEI_DUBAI
+	dubai_log_kworker((unsigned long)(worker->current_func), uptime);
+#endif
 	/*
 	 * While we must be careful to not use "work" after this, the trace
 	 * point will only record its address.

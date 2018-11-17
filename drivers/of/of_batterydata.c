@@ -19,6 +19,38 @@
 #include <linux/types.h>
 #include <linux/batterydata-lib.h>
 #include <linux/power_supply.h>
+#include <linux/qpnp/qpnp-adc.h>
+
+/*
+ * The standard battery id range is between 960 and 450K ohm,
+ * we use the 1000K as default battery data id resistance.
+ */
+#define DEFAULT_BATT_ID	1000
+
+#define BATT_ID_TYPE 7
+
+/* design_kohm--------resistance that given in advance
+ * thres_down---------the lower limit for the resistance
+ * thres_up---------the higher limit of the resistance
+ */
+struct batt_id_map
+{
+	int design_kohm;
+	int thres_down;
+	int thres_up;
+};
+
+struct batt_id_map batt_id_map[BATT_ID_TYPE] =
+{
+	{10,7,16},
+	{22,16,31},
+	{39,31,54},
+	{68,54,89},
+	{110,89,156},
+	{200,156,335},
+	{470,335,700},
+};
+
 
 static int of_batterydata_read_lut(const struct device_node *np,
 			int max_cols, int max_rows, int *ncols, int *nrows,
@@ -192,7 +224,7 @@ static int of_batterydata_read_batt_id_kohm(const struct device_node *np,
 	const __be32 *data;
 	int num, i, *id_kohm = batt_ids->kohm;
 
-	prop = of_find_property(np, "qcom,batt-id-kohm", NULL);
+	prop = of_find_property(np, propname, NULL);
 	if (!prop) {
 		pr_err("%s: No battery id resistor found\n", np->name);
 		return -EINVAL;
@@ -315,7 +347,7 @@ struct device_node *of_batterydata_get_best_profile(
 		const char *psy_name,  const char  *batt_type)
 {
 	struct batt_ids batt_ids;
-	struct device_node *node, *best_node = NULL;
+	struct device_node *node = NULL, *best_node = NULL, *default_node = NULL;
 	struct power_supply *psy;
 	const char *battery_type = NULL;
 	union power_supply_propval ret = {0, };
@@ -383,12 +415,17 @@ struct device_node *of_batterydata_get_best_profile(
 					best_delta = delta;
 					best_id_kohm = batt_ids.kohm[i];
 				}
+				if (batt_ids.kohm[i] == DEFAULT_BATT_ID) {
+					default_node = node;
+				}
 			}
 		}
 	}
 
 	if (best_node == NULL) {
-		pr_err("No battery data found\n");
+		/* if no battery id is matched, use the default */
+		best_node = default_node;
+		pr_info("use default battery data\n");
 		return best_node;
 	}
 
@@ -464,6 +501,240 @@ int of_batterydata_read_data(struct device_node *batterydata_container_node,
 
 	return of_batterydata_load_battery_data(best_node,
 					best_id_kohm, batt_data);
+}
+
+
+int of_batterydata_batt_kohm_cw(struct device_node *main_node,
+				int batt_id_uv)
+{
+	int rc = 0;
+	u32 rpull_up_kohm = 0;
+	u32 vadc_vdd_uv = 0;
+	int batt_id_kohm = 0;
+
+    if (!main_node) {
+        pr_err("%s: invalid param, fatal error\n", __func__);
+        return -EINVAL;
+    }
+
+	rc = of_property_read_u32(main_node, "cw,rpull-up-kohm", &rpull_up_kohm);
+	if (rc || rpull_up_kohm <=0)
+	{
+		pr_err("read dtsi battery data rpull-up-kohm failed!!");
+		return -EINVAL;
+	}
+	rc = of_property_read_u32(main_node, "cw,vref-batt-therm", &vadc_vdd_uv);
+	if (rc || vadc_vdd_uv <= 0)
+	{
+		pr_err("read dtsi battery data vref-batt-therm failed!!");
+		return -EINVAL;
+	}
+
+	pr_debug("rpull_up_kohm %d, vadc_vdd_uv %d \n",rpull_up_kohm, vadc_vdd_uv);
+	/* convert battery id voltage to kohm */
+	batt_id_kohm = of_batterydata_convert_battery_id_kohm(batt_id_uv,
+					(int)rpull_up_kohm, (int)vadc_vdd_uv);
+	pr_info("current battery id kohm %d \n", batt_id_kohm);
+
+	return batt_id_kohm;
+}
+
+struct device_node* 
+of_batterydata_get_dts_node_cw(struct device_node *node, int batt_id_uv)
+{
+	int rc = 0;
+	static bool bset_batt_name = false;
+	int batt_id_kohm = 0;
+	int batt_id_idx = 0;
+	struct batt_ids bat_ids;
+	struct device_node* pfor_node = NULL;
+	struct device_node* pfnd_node = NULL;
+	struct device_node* default_node = NULL;
+
+    if (!node) {
+        pr_err("%s: invalid param, fatal error\n", __func__);
+        return NULL;
+    }
+
+	if (batt_id_uv <= 0){
+		pr_err("the battery id voltage is not right, volt=%d !!\n", batt_id_uv);
+		return NULL;
+	}
+
+	batt_id_kohm = of_batterydata_batt_kohm_cw(node, batt_id_uv);
+	if (batt_id_kohm < 0)
+	{
+		pr_err("get the battery kohm failed by battery id voltage! \n");
+		return NULL;
+ 	}
+
+	/* Check battery id kohm, and get the type value kohm */
+	for (batt_id_idx = 0; batt_id_idx < BATT_ID_TYPE; batt_id_idx++)
+	{
+		if (is_between(batt_id_map[batt_id_idx].thres_down,
+			batt_id_map[batt_id_idx].thres_up, batt_id_kohm))
+		{
+
+			pr_err("get the battery kohm  by battery id voltage :%d %d \n",batt_id_kohm,batt_id_idx);
+			break;
+		}
+	}
+	if (batt_id_idx >= BATT_ID_TYPE)
+	{
+		pr_err("the battery kohm is not in the batt_id_map! \n");
+		batt_id_idx = BATT_ID_TYPE;
+	}
+
+	/* Find the right battery data by kohm from dtsi nodes */
+	for_each_child_of_node(node, pfor_node)
+	{
+		rc = of_batterydata_read_batt_id_kohm(pfor_node,
+			"cw,batt-id-kohm", &bat_ids);
+		if (rc)
+		{
+			continue;
+		}
+		
+		if (batt_id_map[batt_id_idx].design_kohm == bat_ids.kohm[0])
+		{
+			pfnd_node = pfor_node;
+			batt_id_kohm = bat_ids.kohm[0];
+			break;
+		}
+		if(bat_ids.kohm[0] == DEFAULT_BATT_ID)
+			default_node = pfor_node;
+	}
+	if (NULL == pfnd_node)
+	{
+		pr_err("Can not find the dtsi node battery data by kohm use default node \n");
+		pfnd_node = default_node;
+	}
+
+	return pfnd_node;
+ 
+ }
+
+int of_batterydata_read_fgauge_data_cw(struct device_node *main_node,
+				struct cw_batt_data* pbatt_data,
+				int batt_id_uv)
+{
+	int rc = 0;
+	struct device_node* pfnd_node = NULL;
+	struct property *prop = NULL;
+	int col = 0,raw = 0,lenth = 0;
+	int i = 0;
+    int j = 0;
+	int ret = 0;
+
+	const __be32* pdata = NULL;
+
+	/* get the battery data nodes container */
+	pfnd_node = main_node;
+	if (NULL == pfnd_node)
+	{
+		pr_err("Can not find the  battery-data dtsi container node!!\n");
+		return -ENODATA;
+	}
+
+	/* get the battery data node by battery id voltage */
+	pfnd_node = of_batterydata_get_dts_node_cw(pfnd_node, batt_id_uv);
+	if (NULL == pfnd_node || NULL == pbatt_data)
+	{
+	
+		pr_err("Can not find the  battery-data dtsi container node222!!\n");
+		return -ENODATA;
+	}
+
+	/* read battery data from dts node */
+	/* battery name */
+	ret = of_property_read_string(pfnd_node, "cw,battery-type", &pbatt_data->battery_type);
+	ret = of_property_read_u32(pfnd_node, "cw,colum",&col);
+	if(ret)
+		pr_err("Can not find the  battery-data col!!\n");
+	ret = of_property_read_u32(pfnd_node, "cw,raw",&raw);
+	if(ret)
+		pr_err("Can not find the  battery-data raw!!\n");
+	ret = of_property_read_u32(pfnd_node, "cw,nom_cap_uah",&pbatt_data->nom_cap_uah);
+	if(ret)
+		pr_err("Can not find the  battery-data nom_cap_uah!!\n");
+
+	pr_err("cw,battery: %s nom_cap_uah %ld!!\n",pbatt_data->battery_type,pbatt_data->nom_cap_uah);
+
+	lenth = col*raw;
+
+    if (IS_ENABLED(CONFIG_HLTHERM_RUNTEST))
+        prop = of_find_property(pfnd_node, "cw,model_data_hltherm", NULL);
+    else
+	    prop = of_find_property(pfnd_node, "cw,model_data", NULL);
+	if (!prop || !prop->value) 
+	{
+		pr_err("%s: No model_data value found!\n", pfnd_node->name);
+		return -ENODATA;
+	} 
+ 	else if (lenth != prop->length / sizeof(int))
+	{
+		pr_err("%s: model_data has no %d values!!\n",
+			pfnd_node->name, lenth);
+		return -ENODATA;
+	}
+	else
+	{
+	
+		pdata = prop->value;
+         for (i = 0; i < col; i++){
+            for(j = 0; j<raw; j++)
+            {
+                pbatt_data->model_data[i][j] = be32_to_cpup(pdata++);
+                pr_info("pbatt_data->model_data[%d][%d] = 0x%x\n",i,j,pbatt_data->model_data[i][j]);
+            }
+        }
+	}
+	return 0;
+}
+
+/* get temp by searching voltage/temp mapping table */
+int32_t of_batterydata_adc_map_temp_voltage(const struct qpnp_vadc_map_pt *pts,
+                    uint32_t tablesize, int32_t input, int32_t *output)
+{
+    bool descending = 1;
+    uint32_t i = 0;
+
+    if (!pts || !output)
+        return -EINVAL;
+    /* Check if table is descending or ascending */
+    if (tablesize > 1) {
+        if (pts[0].y < pts[1].y)
+            descending = 0;
+    }
+
+    while (i < tablesize) {
+        if ((descending == 1) && (pts[i].y < input)) {
+            /* table entry is less than measured
+                value and table is descending, stop */
+            break;
+        } else if ((descending == 0) && (pts[i].y > input)) {
+            /* table entry is greater than measured
+                value and table is ascending, stop */
+            break;
+        } else {
+            i++;
+        }
+    }
+
+    if (i == 0) {
+        *output = pts[0].x;
+    } else if (i == tablesize) {
+        *output = pts[tablesize-1].x;
+    } else {
+        /* result is between search_index and search_index-1 */
+        /* interpolate linearly */
+        *output = (((int32_t) ((pts[i].x - pts[i-1].x)*
+            (input - pts[i-1].y))/
+            (pts[i].y - pts[i-1].y))+
+            pts[i-1].x);
+    }
+
+    return 0;
 }
 
 MODULE_LICENSE("GPL v2");

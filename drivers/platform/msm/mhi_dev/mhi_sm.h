@@ -13,7 +13,7 @@
 #ifndef MHI_SM_H
 #define MHI_SM_H
 
-#include "mhi.h"
+#include <linux/msm_mhi_dev.h>
 #include <linux/slab.h>
 #include <linux/msm_ep_pcie.h>
 
