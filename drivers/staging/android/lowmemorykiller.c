@@ -228,6 +228,8 @@ static int test_task_flag(struct task_struct *p, int flag)
 	return 0;
 }
 
+static DEFINE_MUTEX(scan_mutex);
+
 int can_use_cma_pages(gfp_t gfp_mask)
 {
 	int can_use = 0;
@@ -412,7 +414,8 @@ static unsigned long lowmem_scan(struct shrinker *s, struct shrink_control *sc)
 	int array_size = ARRAY_SIZE(lowmem_adj);
 	int other_free;
 	int other_file;
-        static atomic_t atomic_lmk = ATOMIC_INIT(0);
+	if (mutex_lock_interruptible(&scan_mutex) < 0)
+		return 0;
 
 	other_free = global_page_state(NR_FREE_PAGES);
 
@@ -449,15 +452,11 @@ static unsigned long lowmem_scan(struct shrinker *s, struct shrink_control *sc)
 		trace_almk_shrink(0, ret, other_free, other_file, 0);
 		lowmem_print(5, "lowmem_scan %lu, %x, return 0\n",
 			     sc->nr_to_scan, sc->gfp_mask);
+		mutex_unlock(&scan_mutex);
 		return 0;
 	}
 
 	selected_oom_score_adj = min_score_adj;
-
-	if (atomic_inc_return(&atomic_lmk) > 1) {
-		atomic_dec(&atomic_lmk);
-		return 0;
-	}
 
 	rcu_read_lock();
 	for_each_process(tsk) {
@@ -476,7 +475,7 @@ static unsigned long lowmem_scan(struct shrinker *s, struct shrink_control *sc)
 				rcu_read_unlock();
 				/* give the system time to free up the memory */
 				msleep_interruptible(20);
-				atomic_dec(&atomic_lmk);
+				mutex_unlock(&scan_mutex);
 				return 0;
 			}
 		}
@@ -571,7 +570,7 @@ static unsigned long lowmem_scan(struct shrinker *s, struct shrink_control *sc)
 
 	lowmem_print(4, "lowmem_scan %lu, %x, return %lu\n",
 		     sc->nr_to_scan, sc->gfp_mask, rem);
-	atomic_dec(&atomic_lmk);
+	mutex_unlock(&scan_mutex);
 	return rem;
 }
 
