@@ -67,7 +67,8 @@ static size_t binder_alloc_buffer_size(struct binder_alloc *alloc,
 	if (list_is_last(&buffer->entry, &alloc->buffers))
 		return alloc->buffer +
 		       alloc->buffer_size - (void *)buffer->data;
-	return (size_t)binder_buffer_next(buffer) - (size_t)buffer->data;
+	return (size_t)list_entry(buffer->entry.next,
+                         struct binder_buffer, entry) - (size_t)buffer->data;
 }
 
 static void binder_insert_free_buffer(struct binder_alloc *alloc,
