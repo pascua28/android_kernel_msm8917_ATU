@@ -1231,7 +1231,7 @@ static void steal_suitable_fallback(struct zone *zone, struct page *page,
 
 /* Check whether there is a suitable fallback freepage with requested order. */
 static int find_suitable_fallback(struct free_area *area, unsigned int order,
-                                       int migratetype, bool *can_steal)
+					int migratetype, bool *can_steal)
 {
 	int i;
 	int fallback_mt;
