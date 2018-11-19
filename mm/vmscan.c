@@ -149,7 +149,7 @@ struct scan_control {
 #endif
 
 /*
- * Kswapd swappiness, from 0 - 200.  Higher means more swappy.
+ * From 0 .. 100.  Higher means more swappy.
  */
 int vm_swappiness = 60;
 
@@ -2024,9 +2024,8 @@ static void get_scan_count(struct lruvec *lruvec, int swappiness,
 	 * latencies, so it's better to scan a minimum amount there as
 	 * well.
 	 */
-       if (current_is_kswapd() && !zone_reclaimable(zone))
-               force_scan = true;
-
+	if (current_is_kswapd() && !zone_reclaimable(zone))
+		force_scan = true;
 	if (!global_reclaim(sc))
 		force_scan = true;
 
