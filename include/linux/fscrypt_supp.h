@@ -145,5 +145,13 @@ extern void fscrypt_decrypt_bio_pages(struct fscrypt_ctx *, struct bio *);
 extern void fscrypt_pullback_bio_page(struct page **, bool);
 extern int fscrypt_zeroout_range(const struct inode *, pgoff_t, sector_t,
 				 unsigned int);
-
+extern int fscrypt_decrypt_dio_page(struct inode *inode, struct page *page,
+			unsigned int len, unsigned int offs, u64 lblk_num);
+extern void fscrypt_decrypt_dio_bio_pages(struct fscrypt_ctx *, struct bio *,
+				   work_func_t func);
+extern struct page *fscrypt_encrypt_dio_page(const struct inode *,
+				struct page *,
+				unsigned int,
+				unsigned int,
+				u64, gfp_t);
 #endif	/* _LINUX_FSCRYPT_SUPP_H */
