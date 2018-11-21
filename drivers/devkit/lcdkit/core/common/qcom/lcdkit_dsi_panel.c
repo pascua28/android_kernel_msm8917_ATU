@@ -9,6 +9,7 @@
 
 #ifdef CONFIG_POWERSUSPEND
 #include <linux/powersuspend.h>
+#include <linux/qdsp6v2/apr.h>
 #endif
 
 #define BLK_PAYLOAD_NUM_OFFSET	6
@@ -459,7 +460,8 @@ int mdss_dsi_panel_off(struct mdss_panel_data *pdata)
 	LCDKIT_INFO("nomal exit: -\n");
 
 #ifdef CONFIG_POWERSUSPEND
-       set_power_suspend_state_panel_hook(POWER_SUSPEND_ACTIVE);
+	if (!q6voice_voice_call_active())
+		set_power_suspend_state_panel_hook(POWER_SUSPEND_ACTIVE);
 #endif
 
 #ifdef CONFIG_LOG_JANK
