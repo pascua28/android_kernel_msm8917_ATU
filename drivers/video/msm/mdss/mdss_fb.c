@@ -1667,7 +1667,7 @@ void mdss_fb_set_backlight(struct msm_fb_data_type *mfd, u32 bkl_lvl)
 	bool bl_notify_needed = false;
 #if defined(CONFIG_HUAWEI_KERNEL_LCD) || defined(CONFIG_LCDKIT_DRIVER)
 	unsigned long timeout;
-	timeout = jiffies + HZ/10 ;
+	timeout = jiffies + msecs_to_jiffies(100);
 #endif
 	if ((((mdss_fb_is_power_off(mfd) && mfd->dcm_state != DCM_ENTER)
 		|| !mfd->allow_bl_update) && !IS_CALIB_MODE_BL(mfd)) ||
@@ -1717,7 +1717,7 @@ void mdss_fb_set_backlight(struct msm_fb_data_type *mfd, u32 bkl_lvl)
             #ifdef CONFIG_LCDKIT_DRIVER
 			if(!time_before(jiffies, timeout)){
 				LCDKIT_INFO(": set backlight time = %u\n",
-			 		jiffies_to_msecs(jiffies-timeout+HZ/10));
+			 		jiffies_to_msecs(jiffies-timeout+msecs_to_jiffies(100)));
 			}
 			#endif
 			mfd->bl_level = bkl_lvl;
