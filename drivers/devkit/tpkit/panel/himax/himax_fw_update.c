@@ -823,7 +823,7 @@ static void  firmware_update(const struct firmware *fw)
 
 #ifdef HX_CHIP_STATUS_MONITOR
 				HX_CHIP_POLLING_COUNT = 0;
-				queue_delayed_work(g_himax_ts_data->himax_chip_monitor_wq, &g_himax_ts_data->himax_chip_monitor, HX_POLLING_TIMES*HZ);
+				queue_delayed_work(g_himax_ts_data->himax_chip_monitor_wq, &g_himax_ts_data->himax_chip_monitor, msecs_to_jiffies(2000));
 #endif
 			TS_LOG_INFO("himax i_update function end ");
 	}

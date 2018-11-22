@@ -977,7 +977,7 @@ static irqreturn_t ts_irq_handler(int irq, void* dev_id)
     int error = NO_ERR;
     struct ts_cmd_node cmd;
 
-    wake_lock_timeout(&g_ts_kit_platform_data.ts_wake_lock, HZ);
+    wake_lock_timeout(&g_ts_kit_platform_data.ts_wake_lock, msecs_to_jiffies(1000));
 
     if (g_ts_kit_platform_data.chip_data->ops->chip_irq_top_half)
     { error = g_ts_kit_platform_data.chip_data->ops->chip_irq_top_half(&cmd); }
@@ -2986,7 +2986,7 @@ int ts_kit_put_one_cmd(struct ts_cmd_node* cmd, int timeout)
     error = NO_ERR;
     wake_up_process(g_ts_kit_platform_data.ts_task); //wakeup process
 
-    if (timeout && !(wait_for_completion_timeout(&sync->done, abs(timeout)*HZ)))
+    if (timeout && !(wait_for_completion_timeout(&sync->done, abs(timeout)*msecs_to_jiffies(1000))))
     {
         atomic_set(&sync->timeout_flag, TS_TIMEOUT);
         TS_LOG_ERR("wait for cmd respone timeout\n");
