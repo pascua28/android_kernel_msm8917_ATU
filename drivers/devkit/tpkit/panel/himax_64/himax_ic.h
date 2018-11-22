@@ -164,7 +164,7 @@
 #define STR_IC_NAME "hx83102b"
 #define MODULE_NAME "hlt"
 #define PRODUCE_ID "lodn67260"
-#define TS_WAKE_LOCK_TIMEOUT 5*HZ
+#define TS_WAKE_LOCK_TIMEOUT msecs_to_jiffies(5000)
 #define FLASH_DUMP_FILE "/data/user/Flash_Dump.bin"
 #define HX_FW_NAME "ts/touch_screen_firmware.bin"
 #define CSVFILE_USE_SYSTEM_TYPE "himax,csvfile_use_system"
@@ -189,9 +189,9 @@
 #define IRQ_DISABLE 0
 #define IRQ_ENABLE 1
 #define HW_RST_FLAT_ENABLE 1
-#define TIME_OUT_200MS 5 * HZ
-#define WORK_QUE_TIME_100MS 1/10*HZ
-#define WORK_QUE_TIME_20MS 2*HZ/100
+#define TIME_OUT_200MS msecs_to_jiffies(5000)
+#define WORK_QUE_TIME_100MS msecs_to_jiffies(100)
+#define WORK_QUE_TIME_20MS msecs_to_jiffies(20)
 /*Gesture register(0xd0) value*/
 #define DOUBLE_CLICK_WAKEUP  		(0x80)
 #define SPECIFIC_LETTER_W  			(0x0b)

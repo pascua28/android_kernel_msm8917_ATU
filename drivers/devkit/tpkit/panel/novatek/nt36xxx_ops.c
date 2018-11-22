@@ -2273,7 +2273,7 @@ static int novatek_wakeup_gesture_report(struct ts_fingers *info,
 
 
 	if (0 != reprot_gesture_key_value) {
-		wake_lock_timeout(&nvt_ts->chip_data->ts_platform_data->ts_wake_lock, 5 * HZ);
+		wake_lock_timeout(&nvt_ts->chip_data->ts_platform_data->ts_wake_lock, msecs_to_jiffies(5000));
 		info->gesture_wakeup_value = reprot_gesture_key_value;
 	}else{
 		TS_LOG_INFO("%s: reprot_gesture_key_value = 0 !!\n", __func__);

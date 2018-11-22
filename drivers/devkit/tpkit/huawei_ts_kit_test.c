@@ -117,7 +117,7 @@ int cq_item_1_func(void *data)
 		start_time = ktime_get();
 		if (NO_ERR == ts_kit_put_one_cmd(&cmd)) {
 			if (wait_for_completion_timeout
-			    (&cq_test_sync_1, 5 * HZ)) {
+			    (&cq_test_sync_1, msecs_to_jiffies(5000))) {
 				stop_time = ktime_get();
 				delta = ktime_sub(stop_time, start_time);
 				delta_us = (long long)ktime_to_us(delta);
@@ -147,7 +147,7 @@ int cq_item_2_func(void *data)
 		init_completion(&cq_test_sync_1);
 		if (NO_ERR == ts_kit_put_one_cmd(&cmd)) {
 			if (wait_for_completion_timeout
-			    (&cq_test_sync_1, 5 * HZ)) {
+			    (&cq_test_sync_1, msecs_to_jiffies(5000))) {
 				TS_LOG_INFO
 				    ("CMD PROCESS %d FINISH - cpu id:%d\n", i,
 				     smp_processor_id());
@@ -185,7 +185,7 @@ int cq_item_3_func(void *data)
 			complete(&cq_test_sync_1);
 			if (try_wait_for_completion(&cq_test_sync_2) ||
 			    wait_for_completion_timeout(&cq_test_sync_2,
-							10 * HZ)) {
+							msecs_to_jiffies(10000))) {
 				TS_LOG_INFO("CMD PROCESS FINISH\n");
 			} else
 				TS_LOG_ERR
