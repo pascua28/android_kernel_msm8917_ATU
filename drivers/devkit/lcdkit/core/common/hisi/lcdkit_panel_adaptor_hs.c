@@ -891,7 +891,7 @@ int lcdkit_check_mipi_fifo_empty(char __iomem *dsi_base)
     int is_timeout = 1;
 
     /*read status register*/
-    dw_jiffies = jiffies + HZ;
+    dw_jiffies = jiffies + msecs_to_jiffies(1000);
     do {
         pkg_status = inp32(dsi_base + MIPIDSI_CMD_PKT_STATUS_OFFSET);
         phy_status = inp32(dsi_base + MIPIDSI_PHY_STATUS_OFFSET);
@@ -1095,7 +1095,7 @@ void lcdkit_fps_timer_adaptor_init(void)
 {
         init_timer(&lcdkit_info.panel_infos.fps_scence_timer);
         lcdkit_info.panel_infos.fps_scence_timer.data = 0;
-        lcdkit_info.panel_infos.fps_scence_timer.expires = jiffies + HZ;
+        lcdkit_info.panel_infos.fps_scence_timer.expires = jiffies + msecs_to_jiffies(1000);
         lcdkit_info.panel_infos.fps_scence_timer.function = lcdkit_fps_timer_adaptor_handler;
 
         lcdkit_info.panel_infos.fps_scence_wq = create_singlethread_workqueue("fps_wq");
@@ -1138,14 +1138,14 @@ void lcdkit_fps_adaptor_ts_callback(void)
     if (LCD_FPS_SCENCE_FUNC_DEFAULT_ENABLE != pinfo->fps_scence)
     {
         LCDKIT_DEBUG("panel not enable dfr, no need to switch\n");
-        mod_timer(&lcdkit_info.panel_infos.fps_scence_timer, jiffies + HZ);
+        mod_timer(&lcdkit_info.panel_infos.fps_scence_timer, jiffies + msecs_to_jiffies(1000));
         return ;
     }
 
     LCDKIT_DEBUG("%s fps to 60 and disable dfr\n", __func__);
     lcdkit_fps_scence_switch_immediately(pdev, LCD_FPS_SCENCE_FUNC_DEFAULT_DISABLE);
 
-    mod_timer(&lcdkit_info.panel_infos.fps_scence_timer, jiffies + HZ);
+    mod_timer(&lcdkit_info.panel_infos.fps_scence_timer, jiffies + msecs_to_jiffies(1000));
     LCDKIT_DEBUG("%s-\n", __func__);
     return ;
 }
