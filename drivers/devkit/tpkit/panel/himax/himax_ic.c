@@ -696,7 +696,7 @@ static void himax_chip_monitor_function(struct work_struct *work) //for ESD solu
 	else
 		HX_CHIP_POLLING_COUNT++;
 
-	queue_delayed_work(g_himax_ts_data->himax_chip_monitor_wq, &g_himax_ts_data->himax_chip_monitor, HX_POLLING_TIMER*HZ);
+	queue_delayed_work(g_himax_ts_data->himax_chip_monitor_wq, &g_himax_ts_data->himax_chip_monitor, msecs_to_jiffies(2000));
 
 	return;
 }
@@ -1547,7 +1547,7 @@ static int himax_chip_detect(struct ts_kit_platform_data *platform_data)
 	}
 
 	INIT_DELAYED_WORK(&ts->himax_chip_monitor, himax_chip_monitor_function);
-	queue_delayed_work(ts->himax_chip_monitor_wq, &ts->himax_chip_monitor, HX_POLLING_TIMER*HZ);
+	queue_delayed_work(ts->himax_chip_monitor_wq, &ts->himax_chip_monitor, msecs_to_jiffies(2000));
 #endif
 
 	atomic_set(&ts->suspend_mode, 0);
@@ -1987,7 +1987,7 @@ static int himax_core_resume(void)
 
 #ifdef HX_CHIP_STATUS_MONITOR
 	HX_CHIP_POLLING_COUNT = 0;
-	queue_delayed_work(ts->himax_chip_monitor_wq, &ts->himax_chip_monitor, HX_POLLING_TIMER*HZ); //for ESD solution
+	queue_delayed_work(ts->himax_chip_monitor_wq, &ts->himax_chip_monitor, msecs_to_jiffies(2000)); //for ESD solution
 #endif
 	ts->suspended = false;
 

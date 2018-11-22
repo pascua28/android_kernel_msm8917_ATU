@@ -870,7 +870,7 @@ void thp_tui_secos_init(void)
 		KOBJ_OFFLINE);
 	THP_LOG_INFO("%s: busid=%d. diable irq=%d\n", __func__, cd->spi_config.bus_id,cd->irq);
 	t = wait_event_interruptible_timeout(cd->thp_ta_waitq,
-				(cd->thp_ta_waitq_flag == WAITQ_WAKEUP),HZ);
+				(cd->thp_ta_waitq_flag == WAITQ_WAKEUP),msecs_to_jiffies(1000));
 	THP_LOG_INFO("%s: wake up finish \n",__func__);
 
 	spi_init_secos(cd->spi_config.bus_id);

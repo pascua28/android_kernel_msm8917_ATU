@@ -778,7 +778,7 @@ static ssize_t himax_debug_dump(struct device *dev,struct device_attribute *attr
 	himax_int_enable(g_himax_ts_data->tskit_himax_data->ts_platform_data->irq_id,1);
 #ifdef HX_CHIP_STATUS_MONITOR
 	HX_CHIP_POLLING_COUNT = 0;
-	queue_delayed_work(g_himax_ts_data->himax_chip_monitor_wq, &g_himax_ts_data->himax_chip_monitor, HX_POLLING_TIMES*HZ);
+	queue_delayed_work(g_himax_ts_data->himax_chip_monitor_wq, &g_himax_ts_data->himax_chip_monitor, msecs_to_jiffies(2000));
 #endif
 
 	return count;
@@ -932,7 +932,7 @@ Flash_Dump_i2c_transfer_error:
 	himax_int_enable(g_himax_ts_data->tskit_himax_data->ts_platform_data->irq_id,1);
 #ifdef HX_CHIP_STATUS_MONITOR
 	HX_CHIP_POLLING_COUNT = 0;
-	queue_delayed_work(g_himax_ts_data->himax_chip_monitor_wq, &g_himax_ts_data->himax_chip_monitor, HX_POLLING_TIMES*HZ);
+	queue_delayed_work(g_himax_ts_data->himax_chip_monitor_wq, &g_himax_ts_data->himax_chip_monitor, msecs_to_jiffies(2000));
 #endif
 	setFlashDumpGoing(false);
 	setFlashDumpComplete(0);
@@ -982,7 +982,7 @@ Flash_Dump_i2c_transfer_error:
 	himax_int_enable(g_himax_ts_data->tskit_himax_data->ts_platform_data->irq_id,1);
 #ifdef HX_CHIP_STATUS_MONITOR
 	HX_CHIP_POLLING_COUNT = 0;
-	queue_delayed_work(g_himax_ts_data->himax_chip_monitor_wq, &g_himax_ts_data->himax_chip_monitor, HX_POLLING_TIMES*HZ);
+	queue_delayed_work(g_himax_ts_data->himax_chip_monitor_wq, &g_himax_ts_data->himax_chip_monitor, msecs_to_jiffies(2000));
 #endif
 	setFlashDumpGoing(false);
 	setFlashDumpComplete(0);
@@ -1409,7 +1409,7 @@ void himax_ts_flash_work_func(struct work_struct *work)
 	himax_int_enable(g_himax_ts_data->tskit_himax_data->ts_platform_data->irq_id,1);
 #ifdef HX_CHIP_STATUS_MONITOR
 	HX_CHIP_POLLING_COUNT = 0;
-	queue_delayed_work(g_himax_ts_data->himax_chip_monitor_wq, &g_himax_ts_data->himax_chip_monitor, HX_POLLING_TIMES*HZ);
+	queue_delayed_work(g_himax_ts_data->himax_chip_monitor_wq, &g_himax_ts_data->himax_chip_monitor, msecs_to_jiffies(2000));
 #endif
 	setFlashDumpGoing(false);
 
@@ -1425,7 +1425,7 @@ Flash_Dump_i2c_transfer_error:
 	himax_int_enable(g_himax_ts_data->tskit_himax_data->ts_platform_data->irq_id,1);
 #ifdef HX_CHIP_STATUS_MONITOR
 	HX_CHIP_POLLING_COUNT = 0;
-	queue_delayed_work(g_himax_ts_data->himax_chip_monitor_wq, &g_himax_ts_data->himax_chip_monitor, HX_POLLING_TIMES*HZ);
+	queue_delayed_work(g_himax_ts_data->himax_chip_monitor_wq, &g_himax_ts_data->himax_chip_monitor, msecs_to_jiffies(2000));
 #endif
 	setFlashDumpGoing(false);
 	setFlashDumpComplete(0);
@@ -1824,7 +1824,7 @@ static ssize_t himax_self_test_read(struct device *dev,struct device_attribute *
 	himax_int_enable(g_himax_ts_data->tskit_himax_data->ts_platform_data->irq_id,1);
 #ifdef HX_CHIP_STATUS_MONITOR
 	HX_CHIP_POLLING_COUNT = 0;
-	queue_delayed_work(g_himax_ts_data->himax_chip_monitor_wq, &g_himax_ts_data->himax_chip_monitor, HX_POLLING_TIMES*HZ);
+	queue_delayed_work(g_himax_ts_data->himax_chip_monitor_wq, &g_himax_ts_data->himax_chip_monitor, msecs_to_jiffies(2000));
 #endif
 
 #ifdef HIMAX_BANK_SELF_TEST
