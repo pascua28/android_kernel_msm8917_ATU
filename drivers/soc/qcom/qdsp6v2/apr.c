@@ -36,7 +36,7 @@
 #include <linux/qdsp6v2/dsp_debug.h>
 #include <linux/ipc_logging.h>
 #ifdef CONFIG_HUAWEI_DSM_AUDIO
-#include <dsm_audio/dsm_audio.h>
+#include "../../../devkit/audiokit/dsm_audio/dsm_audio.h"
 #endif
 
 #define SCM_Q6_NMI_CMD 0x1
