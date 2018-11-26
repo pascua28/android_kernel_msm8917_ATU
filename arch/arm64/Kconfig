@@ -1159,8 +1159,3 @@ source "arch/arm64/mm/Kconfig"
 
 source "arch/arm64/hotplug/Kconfig"
 
-config ALUCARD_CONTROL
-	bool "Alucard"
-	depends on HOTPLUG_CPU && SMP
-	help
-	  Known for being battery friendly. Developed by Alucard_24@XDA
