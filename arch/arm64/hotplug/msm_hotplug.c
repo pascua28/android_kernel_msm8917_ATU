@@ -19,8 +19,8 @@
 #include <linux/device.h>
 #include <linux/slab.h>
 #include <linux/cpufreq.h>
-#ifdef CONFIG_STATE_NOTIFIER
-#include <linux/state_notifier.h>
+#ifdef CONFIG_POWERSUSPEND
+#include <linux/powersuspend.h>
 #endif
 #include <linux/mutex.h>
 #include <linux/input.h>
@@ -472,7 +472,7 @@ reschedule:
 	reschedule_hotplug_work();
 }
 
-#ifdef CONFIG_STATE_NOTIFIER
+#ifdef CONFIG_POWERSUSPEND
 static void msm_hotplug_suspend(void)
 {
 	int cpu;
@@ -533,25 +533,27 @@ static void msm_hotplug_resume(void)
 		reschedule_hotplug_work();
 }
 
-static int state_notifier_callback(struct notifier_block *this,
-				unsigned long event, void *data)
+static void __ref msm_hp_suspend(struct power_suspend *handler)
 {
 	if (!hotplug.msm_enabled)
-		return NOTIFY_OK;
+		return;
 
-	switch (event) {
-		case STATE_NOTIFIER_ACTIVE:
-			msm_hotplug_resume();
-			break;
-		case STATE_NOTIFIER_SUSPEND:
-			msm_hotplug_suspend();
-			break;
-		default:
-			break;
-	}
+	msm_hotplug_suspend();
 
-	return NOTIFY_OK;
 }
+
+static void __ref msm_hp_resume(struct power_suspend *handler)
+{
+	if (!hotplug.msm_enabled)
+		return;
+	
+	msm_hotplug_resume();
+}
+
+static struct power_suspend msm_hotplug_power_suspend_driver = {
+	.suspend = msm_hp_suspend,
+	.resume = msm_hp_resume,
+};
 #endif
 
 static void hotplug_input_event(struct input_handle *handle, unsigned int type,
@@ -659,13 +661,8 @@ static int msm_hotplug_start(void)
 		goto err_out;
 	}
 
-#ifdef CONFIG_STATE_NOTIFIER
-	hotplug.notif.notifier_call = state_notifier_callback;
-	if (state_register_client(&hotplug.notif)) {
-		pr_err("%s: Failed to register State notifier callback\n",
-			MSM_HOTPLUG);
-		goto err_dev;
-	}
+#ifdef CONFIG_POWERSUSPEND
+	register_power_suspend(&msm_hotplug_power_suspend_driver);
 #endif
 
 	ret = input_register_handler(&hotplug_input_handler);
@@ -728,8 +725,8 @@ static void __ref msm_hotplug_stop(void)
 	mutex_destroy(&stats.stats_mutex);
 	kfree(stats.load_hist);
 
-#ifdef CONFIG_STATE_NOTIFIER
-	state_unregister_client(&hotplug.notif);
+#ifdef CONFIG_POWERSUSPEND
+	unregister_power_suspend(&msm_hotplug_power_suspend_driver);
 #endif
 	hotplug.notif.notifier_call = NULL;
 	input_unregister_handler(&hotplug_input_handler);
