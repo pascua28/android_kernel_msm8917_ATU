@@ -1157,6 +1157,8 @@ source "lib/Kconfig"
 
 source "arch/arm64/mm/Kconfig"
 
+source "arch/arm64/hotplug/Kconfig"
+
 config ALUCARD_CONTROL
 	bool "Alucard"
 	depends on HOTPLUG_CPU && SMP
