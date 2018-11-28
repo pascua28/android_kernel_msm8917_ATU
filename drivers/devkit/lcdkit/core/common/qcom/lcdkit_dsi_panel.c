@@ -16,8 +16,16 @@
 #include <linux/state_notifier.h>
 #endif
 
+#include <linux/display_state.h>
+
 #define BLK_PAYLOAD_NUM_OFFSET	6
 #define BLK_PAYLOAD_NUM		0x03
+
+bool display_on = true;
+bool is_display_on()
+{
+	return display_on;
+}
 
 extern int is_device_reboot;
 const char *default_panel_name;
@@ -393,6 +401,8 @@ end:
        set_power_suspend_state_panel_hook(POWER_SUSPEND_INACTIVE);
 #endif
 
+	display_on = true;
+
 
 #ifdef CONFIG_LOG_JANK
     LOG_JANK_D(JLID_KERNEL_LCD_POWER_ON, "%s", "JL_KERNEL_LCD_POWER_ON");
@@ -470,6 +480,8 @@ int mdss_dsi_panel_off(struct mdss_panel_data *pdata)
 #ifdef CONFIG_STATE_NOTIFIER
 		state_suspend();
 #endif
+
+	display_on = false;
 
 #ifdef CONFIG_POWERSUSPEND
 	if (!q6voice_voice_call_active())
