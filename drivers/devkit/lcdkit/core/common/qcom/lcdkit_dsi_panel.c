@@ -12,6 +12,10 @@
 #include <linux/qdsp6v2/apr.h>
 #endif
 
+#ifdef CONFIG_STATE_NOTIFIER
+#include <linux/state_notifier.h>
+#endif
+
 #define BLK_PAYLOAD_NUM_OFFSET	6
 #define BLK_PAYLOAD_NUM		0x03
 
@@ -374,6 +378,10 @@ int mdss_dsi_panel_on(struct mdss_panel_data *pdata)
 end:
 //	pinfo->blank_state = MDSS_PANEL_BLANK_UNBLANK;
 /*set mipi status*/
+#ifdef CONFIG_STATE_NOTIFIER
+		state_resume();
+#endif
+
 #if defined(CONFIG_HUAWEI_KERNEL) && defined(CONFIG_DEBUG_FS)
 	atomic_set(&mipi_path_status, LCDKIT_MIPI_PATH_OPEN);
 #endif
@@ -458,6 +466,10 @@ int mdss_dsi_panel_off(struct mdss_panel_data *pdata)
     lcdkit_info.panel_infos.inversion_mode = COLUMN_INVERSION;
 
 	LCDKIT_INFO("nomal exit: -\n");
+
+#ifdef CONFIG_STATE_NOTIFIER
+		state_suspend();
+#endif
 
 #ifdef CONFIG_POWERSUSPEND
 	if (!q6voice_voice_call_active())
