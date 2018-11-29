@@ -17,9 +17,47 @@
 #include <linux/quotaops.h>
 #include <linux/backing-dev.h>
 #include "internal.h"
+#ifdef CONFIG_POWERSUSPEND
+#include <linux/powersuspend.h>
+#endif
 
 bool fsync_enabled = false;
 module_param(fsync_enabled, bool, 0755);
+bool fsync_switch;
+
+#ifdef CONFIG_POWERSUSPEND
+static void fsync_suspend() {
+	fsync_switch = fsync_enabled;
+
+	if (!fsync_switch)
+		fsync_enabled = true; //enable fsync on suspend if it was disabled before
+
+	return 0;
+}
+
+static void fsync_resume() {
+	if (!fsync_switch)
+		fsync_enabled = false; //re-disable fsync on resume if it was disabled before
+
+	return 0;
+}
+	
+static void __ref sync_suspend(struct power_suspend *handler)
+{
+	fsync_suspend();
+}
+
+static void __ref sync_resume(struct power_suspend *handler)
+{
+	fsync_resume();
+}
+
+static struct power_suspend fsync_power_suspend_driver = {
+	.suspend = sync_suspend,
+	.resume = sync_resume,
+};
+#endif
+
 
 #define VALID_FLAGS (SYNC_FILE_RANGE_WAIT_BEFORE|SYNC_FILE_RANGE_WRITE| \
 			SYNC_FILE_RANGE_WAIT_AFTER)
@@ -390,3 +428,12 @@ SYSCALL_DEFINE4(sync_file_range2, int, fd, unsigned int, flags,
 {
 	return sys_sync_file_range(fd, offset, nbytes, flags);
 }
+
+#ifdef CONFIG_POWERSUSPEND
+static int __init fsync_init(void)
+{
+	register_power_suspend(&fsync_power_suspend_driver);
+	return 0;
+}
+late_initcall(fsync_init);
+#endif
