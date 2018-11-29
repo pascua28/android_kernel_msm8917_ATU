@@ -19,10 +19,6 @@
 
 #include "power.h"
 
-#ifdef CONFIG_HUAWEI_DUBAI
-#include <huawei_platform/log/hwlog_kernel.h>
-#endif
-
 #ifdef CONFIG_HUAWEI_SLEEPLOG
 #include <linux/proc_fs.h>
 #endif
@@ -758,9 +754,6 @@ void pm_print_active_wakeup_sources(void)
 	if (!active && last_activity_ws){
 		pr_info("last active wakeup source: %s\n",
 			last_activity_ws->name);
-#ifdef CONFIG_HUAWEI_DUBAI
-		HWDUBAI_LOGE("DUBAI_TAG_FREEZING_FAILED", "name=%s", last_activity_ws->name);
-#endif
     }
 	rcu_read_unlock();
 }
