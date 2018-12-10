@@ -21,7 +21,7 @@
 #include <linux/powersuspend.h>
 #endif
 
-bool fsync_enabled = false;
+bool fsync_enabled = true;
 module_param(fsync_enabled, bool, 0755);
 bool fsync_switch;
 
