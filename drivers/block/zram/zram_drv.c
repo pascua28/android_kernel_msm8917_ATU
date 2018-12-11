@@ -14,6 +14,7 @@
 
 #define KMSG_COMPONENT "zram"
 #define pr_fmt(fmt) KMSG_COMPONENT ": " fmt
+#define BLK_QC_T_NONE	-1U
 
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -1343,7 +1344,7 @@ static void __zram_make_request(struct zram *zram, struct bio *bio)
 
 	if (unlikely(bio->bi_rw & REQ_DISCARD)) {
 		zram_bio_discard(zram, index, offset, bio);
-		bio_endio(bio);
+		bio_endio(bio, 0);
 		return;
 	}
 
@@ -1365,7 +1366,7 @@ static void __zram_make_request(struct zram *zram, struct bio *bio)
 		} while (unwritten);
 	}
 
-	bio_endio(bio);
+	bio_endio(bio, 0);
 	return;
 
 out:
@@ -1375,7 +1376,7 @@ out:
 /*
  * Handler function for all zram I/O requests.
  */
-static blk_qc_t zram_make_request(struct request_queue *queue, struct bio *bio)
+static void zram_make_request(struct request_queue *queue, struct bio *bio)
 {
 	struct zram *zram = queue->queuedata;
 
@@ -1714,7 +1715,7 @@ static int zram_add(void)
 		zram->disk->queue->limits.discard_zeroes_data = 0;
 	queue_flag_set_unlocked(QUEUE_FLAG_DISCARD, zram->disk->queue);
 
-	zram->disk->queue->backing_dev_info->capabilities |=
+	zram->disk->queue->backing_dev_info.capabilities |=
 					BDI_CAP_STABLE_WRITES;
 	add_disk(zram->disk);
 
