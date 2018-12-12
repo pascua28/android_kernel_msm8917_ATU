@@ -370,7 +370,7 @@ static void adreno_pwr_on_work(struct work_struct *work)
 #if defined(CONFIG_HUAWEI_KERNEL_LCD) || defined(CONFIG_LCDKIT_DRIVER)
 void adreno_force_waking_gpu()
 {
-	schedule_work(&device_3d0.input_work);
+	schedule_work(&adreno_pwr_on_work);
 }
 #endif
 
