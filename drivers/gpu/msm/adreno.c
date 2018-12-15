@@ -367,13 +367,6 @@ static void adreno_pwr_on_work(struct work_struct *work)
 	mutex_unlock(&device->mutex);
 }
 
-#if defined(CONFIG_HUAWEI_KERNEL_LCD) || defined(CONFIG_LCDKIT_DRIVER)
-void adreno_force_waking_gpu()
-{
-	schedule_work(&adreno_pwr_on_work);
-}
-#endif
-
 static int adreno_soft_reset(struct kgsl_device *device);
 
 /*
