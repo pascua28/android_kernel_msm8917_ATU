@@ -44,6 +44,13 @@ config ANDROID_BINDER_DEVICES
 	  created. Each binder device has its own context manager, and is
 	  therefore logically separated from the other devices.
 
+config HW_BINDER_FG_REQ_FIRST
+	bool "Huawei Binder Proceed Foreground Request First"
+	depends on ANDROID_BINDER_IPC && HW_VIP_THREAD
+	default n
+	---help---
+	  Enable binder optimization of Huawei.
+
 config ASHMEM
 	bool "Enable the Anonymous Shared Memory Subsystem"
 	default n
