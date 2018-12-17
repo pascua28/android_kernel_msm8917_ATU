@@ -59,15 +59,6 @@
 
 #define CREATE_TRACE_POINTS
 #include "trace/lowmemorykiller.h"
-#ifdef CONFIG_HUAWEI_KSTATE
-#include <linux/hw_kcollect.h>
-#endif
-#include <linux/atomic.h>
-#include "lowmem_dbg.h"
-
-#ifdef CONFIG_HW_ZEROHUNG
-#include <chipset_common/hwzrhung/zrhung.h>
-#endif
 
 /* to enable lowmemorykiller */
 static int enable_lmk = 1;
@@ -237,7 +228,7 @@ int can_use_cma_pages(gfp_t gfp_mask)
 	int i = 0;
 	int *mtype_fallbacks = get_migratetype_fallbacks(mtype);
 
-	if (is_migrate_cma(mtype) || mtype == MIGRATE_MOVABLE) {
+	if (is_migrate_cma(mtype)) {
 		can_use = 1;
 	} else {
 		for (i = 0;; i++) {
@@ -414,6 +405,7 @@ static unsigned long lowmem_scan(struct shrinker *s, struct shrink_control *sc)
 	int array_size = ARRAY_SIZE(lowmem_adj);
 	int other_free;
 	int other_file;
+
 	if (mutex_lock_interruptible(&scan_mutex) < 0)
 		return 0;
 
@@ -542,20 +534,9 @@ static unsigned long lowmem_scan(struct shrinker *s, struct shrink_control *sc)
 			show_mem(SHOW_MEM_FILTER_NODES);
 			dump_tasks(NULL, NULL);
 		}
-#ifdef CONFIG_HW_ZEROHUNG
-#ifdef CONFIG_HISI_MULTI_KILL
-		if (count  == 0)
-#endif
-			lmkwp_report(selected, sc, cache_size, cache_limit, selected_oom_score_adj, free);
-#endif
 
-		lowmem_dbg(selected_oom_score_adj);
 		lowmem_deathpending_timeout = jiffies + HZ;
 		set_tsk_thread_flag(selected, TIF_MEMDIE);
-#ifdef CONFIG_HUAWEI_KSTATE
-		/*0 stand for low memory kill*/
-		hwkillinfo(selected->tgid, 0);
-#endif
 		send_sig(SIGKILL, selected, 0);
 		rem += selected_tasksize;
 		rcu_read_unlock();
@@ -582,9 +563,6 @@ static struct shrinker lowmem_shrinker = {
 
 static int __init lowmem_init(void)
 {
-#ifdef CONFIG_HW_ZEROHUNG
-	lmkwp_init();
-#endif
 	register_shrinker(&lowmem_shrinker);
 	vmpressure_notifier_register(&lmk_vmpr_nb);
 	return 0;
