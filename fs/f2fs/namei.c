@@ -88,7 +88,7 @@ fail:
 	return ERR_PTR(err);
 }
 
-static int is_multimedia_file(const unsigned char *s, const char *sub)
+static inline int is_multimedia_file(const unsigned char *s, const char *sub)
 {
 	size_t slen = strlen(s);
 	size_t sublen = strlen(sub);
