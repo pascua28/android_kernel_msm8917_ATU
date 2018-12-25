@@ -24,6 +24,7 @@
 #include <linux/mutex.h>
 #include <linux/module.h>
 #include <linux/slab.h>
+#include <linux/delay.h>
 
 #if defined(CONFIG_POWERSUSPEND)
 #include <linux/powersuspend.h>
