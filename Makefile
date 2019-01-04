@@ -438,6 +438,8 @@ KBUILD_CFLAGS   := -Wall -Wundef -Wstrict-prototypes -Wno-trigraphs \
 
 ifeq ($(cc-name),clang)
 KBUILD_CFLAGS   += -O3
+else
+KBUILD_CFLAGS   += -O2
 endif
 KBUILD_CFLAGS   += -Wno-return-type
 KBUILD_AFLAGS_KERNEL :=
@@ -662,8 +664,6 @@ KBUILD_AFLAGS	+= $(call cc-option,-fno-PIE)
 
 ifdef CONFIG_CC_OPTIMIZE_FOR_SIZE
 KBUILD_CFLAGS	+=  $(call cc-option,-Oz,-Os) $(call cc-disable-warning,maybe-uninitialized,)
-else
-KBUILD_CFLAGS	+= -O2
 endif
 
 # Tell gcc to never replace conditional load with a non-conditional one
