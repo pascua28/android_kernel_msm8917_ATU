@@ -79,6 +79,7 @@
 #include "u_qc_ether.c"
 #include "f_gsi.c"
 #include "f_mass_storage.h"
+#include "f_ipc.h"
 
 #ifdef CONFIG_HUAWEI_USB
 #include "hw_rt_deep_sleep_android.c"
@@ -3519,6 +3520,36 @@ static struct android_usb_function dpl_gsi_function = {
 	.bind_config	= dpl_gsi_function_bind_config,
 };
 
+static int ipc_function_init(struct android_usb_function *f,
+				   struct usb_composite_dev *cdev)
+{
+	f->config = ipc_setup();
+
+	return IS_ERR(f->config);
+}
+
+static void ipc_function_cleanup(struct android_usb_function *f)
+{
+	return ipc_cleanup(f->config);
+}
+
+static int ipc_function_bind_config(struct android_usb_function *f,
+					    struct usb_configuration *c)
+{
+	struct usb_function *ipc_f = NULL;
+
+	ipc_f = ipc_bind_config((struct usb_function_instance *)f->config);
+
+	return usb_add_function(c, ipc_f);
+}
+
+static struct android_usb_function ipc_function = {
+	.name           = "ipc",
+	.init           = ipc_function_init,
+	.cleanup        = ipc_function_cleanup,
+	.bind_config    = ipc_function_bind_config,
+};
+
 static struct android_usb_function *supported_functions[] = {
 	[ANDROID_FFS] = &ffs_function,
 	[ANDROID_MBIM_BAM] = &mbim_function,
@@ -3552,6 +3583,7 @@ static struct android_usb_function *supported_functions[] = {
 	[ANDROID_RMNET_GSI] = &rmnet_gsi_function,
 	[ANDROID_MBIM_GSI] = &mbim_gsi_function,
 	[ANDROID_DPL_GSI] = &dpl_gsi_function,
+	[ANDROID_IPC] = &ipc_function,
 	NULL
 };
 
@@ -3590,6 +3622,7 @@ static struct android_usb_function *default_functions[] = {
 #ifdef CONFIG_SND_RAWMIDI
 	&midi_function,
 #endif
+	&ipc_function,
 	NULL
 };
 
