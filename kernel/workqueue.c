@@ -160,7 +160,6 @@ struct worker_pool {
 
 	/* see manage_workers() for details on the two manager mutexes */
 	struct mutex		manager_arb;	/* manager arbitration */
-	struct worker		*manager;	/* L: purely informational */
 	struct mutex		attach_mutex;	/* attach/detach exclusion */
 	struct list_head	workers;	/* A: attached workers */
 	struct completion	*detach_completion; /* all workers detached */
@@ -1946,11 +1945,9 @@ static bool manage_workers(struct worker *worker)
 	 */
 	if (!mutex_trylock(&pool->manager_arb))
 		return false;
-	pool->manager = worker;
 
 	maybe_create_worker(pool);
 
-	pool->manager = NULL;
 	mutex_unlock(&pool->manager_arb);
 	return true;
 }
@@ -2323,7 +2320,6 @@ repeat:
 struct wq_barrier {
 	struct work_struct	work;
 	struct completion	done;
-	struct task_struct	*task;	/* purely informational */
 };
 
 static void wq_barrier_func(struct work_struct *work)
@@ -2372,7 +2368,6 @@ static void insert_wq_barrier(struct pool_workqueue *pwq,
 	INIT_WORK_ONSTACK(&barr->work, wq_barrier_func);
 	__set_bit(WORK_STRUCT_PENDING_BIT, work_data_bits(&barr->work));
 	init_completion(&barr->done);
-	barr->task = current;
 
 	/*
 	 * If @target is currently being executed, schedule the
