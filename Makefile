@@ -436,7 +436,12 @@ KBUILD_CFLAGS   := -Wall -Wundef -Wstrict-prototypes -Wno-trigraphs \
 		   -std=gnu89 -pipe \
 		   -w $(CLANG_FLAGS)
 
+ifeq ($(cc-name),clang)
 KBUILD_CFLAGS   += -O3
+else
+KBUILD_CFLAGS   += -O2 -finline-functions
+endif
+
 KBUILD_CFLAGS   += -Wno-return-type
 KBUILD_AFLAGS_KERNEL :=
 KBUILD_CFLAGS_KERNEL :=
