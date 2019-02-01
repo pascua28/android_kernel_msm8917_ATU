@@ -4393,6 +4393,9 @@ static int __init mmc_init(void)
 {
 	int ret;
 
+    wake_lock_init(&mmc_delayed_work_wake_lock, WAKE_LOCK_SUSPEND,
+        "mmc_delayed_work");
+
 	ret = mmc_register_bus();
 	if (ret)
 		return ret;
