@@ -53,7 +53,6 @@
 #define SDHCI_USE_LEDS_CLASS
 #endif
 
-#include "debug_mask.h"
 #define MAX_TUNING_LOOP 40
 #define MAX_CRCERR_COUNT 2
 
@@ -1782,7 +1781,6 @@ static void sdhci_request(struct mmc_host *mmc, struct mmc_request *mrq)
 
 	host->mrq = mrq;
 
-	sdhci_request_start_log(host, mrq);
 	/*
 	 * Firstly check card presence from cd-gpio.  The return could
 	 * be one of the following possibilities:
@@ -1859,7 +1857,6 @@ static void sdhci_request(struct mmc_host *mmc, struct mmc_request *mrq)
 		else
 			sdhci_send_command(host, mrq->cmd);
 	}
-	sdhci_request_end_log(host, mrq);
 	mmiowb();
 	spin_unlock_irqrestore(&host->lock, flags);
 	return;
@@ -2145,7 +2142,6 @@ static void sdhci_do_set_ios(struct sdhci_host *host, struct mmc_ios *ios)
 static void sdhci_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 {
 	struct sdhci_host *host = mmc_priv(mmc);
-	sdhci_set_ios_log(mmc, ios);
 	sdhci_runtime_pm_get(host);
 	sdhci_do_set_ios(host, ios);
 	sdhci_runtime_pm_put(host);
