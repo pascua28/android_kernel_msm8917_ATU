@@ -51,7 +51,6 @@
 #include "sd_ops.h"
 #include "sdio_ops.h"
 
-#include "rwlog.h"
 EXPORT_TRACEPOINT_SYMBOL_GPL(mmc_blk_erase_start);
 EXPORT_TRACEPOINT_SYMBOL_GPL(mmc_blk_erase_end);
 EXPORT_TRACEPOINT_SYMBOL_GPL(mmc_blk_rw_start);
@@ -1018,7 +1017,6 @@ mmc_start_request(struct mmc_host *host, struct mmc_request *mrq)
 			 mrq->stop->arg, mrq->stop->flags);
 	}
 
-	mmc_start_request_rwlog(host, mrq);
 	WARN_ON(!host->claimed);
 
 	mrq->cmd->error = 0;
@@ -1077,7 +1075,6 @@ static void mmc_start_cmdq_request(struct mmc_host *host,
 		mrq->data->error = 0;
 		mrq->data->mrq = mrq;
 	}
-	mmc_start_cmdq_request_rwlog(host, mrq);
 
 	if (mrq->cmd) {
 		mrq->cmd->error = 0;
@@ -4399,7 +4396,6 @@ static int __init mmc_init(void)
 	if (ret)
 		goto unregister_host_class;
 
-	rwlog_init();
 	return 0;
 
 unregister_host_class:
