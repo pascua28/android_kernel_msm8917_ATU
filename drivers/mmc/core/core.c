@@ -34,7 +34,6 @@
 #include <linux/jiffies.h>
 
 #define CREATE_TRACE_POINTS
-#include <linux/wakelock.h>
 #include <trace/events/mmc.h>
 
 #include <linux/mmc/card.h>
@@ -78,7 +77,6 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(mmc_blk_rw_end);
 
 #define MAX_ACMD41_RETRY_TIMES	5
 
-static struct wake_lock mmc_delayed_work_wake_lock;
 static const unsigned freqs[] = { 400000, 300000, 200000, 100000 };
 
 /*
@@ -4018,11 +4016,7 @@ void mmc_rescan(struct work_struct *work)
 	 */
 	if (host->bus_ops && !host->bus_dead
 	    && !(host->caps & MMC_CAP_NONREMOVABLE))
-	{
-		wake_lock_timeout(&mmc_delayed_work_wake_lock, (5*HZ));
 		host->bus_ops->detect(host);
-		wake_unlock(&mmc_delayed_work_wake_lock);
-	}
 
 	host->detect_change = 0;
 	if (host->ignore_bus_resume_flags)
@@ -4393,9 +4387,6 @@ static int __init mmc_init(void)
 {
 	int ret;
 
-    wake_lock_init(&mmc_delayed_work_wake_lock, WAKE_LOCK_SUSPEND,
-        "mmc_delayed_work");
-
 	ret = mmc_register_bus();
 	if (ret)
 		return ret;
@@ -4415,7 +4406,6 @@ unregister_host_class:
 	mmc_unregister_host_class();
 unregister_bus:
 	mmc_unregister_bus();
-	wake_lock_destroy(&mmc_delayed_work_wake_lock);
 
 	return ret;
 }
@@ -4425,7 +4415,6 @@ static void __exit mmc_exit(void)
 	sdio_unregister_bus();
 	mmc_unregister_host_class();
 	mmc_unregister_bus();
-	wake_lock_destroy(&mmc_delayed_work_wake_lock);
 }
 
 subsys_initcall(mmc_init);
