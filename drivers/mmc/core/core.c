@@ -2694,12 +2694,6 @@ int mmc_set_signal_voltage(struct mmc_host *host, int signal_voltage, u32 ocr)
 	err = mmc_wait_for_cmd(host, &cmd, 0);
 	if (err)
 	{
-#ifdef CONFIG_HUAWEI_KERNEL
-		if(host && (!strcmp(mmc_hostname(host),"mmc1")))
-		{
-			pr_err("%s: send cmd11 fail, err=%d\n", mmc_hostname(host), err);
-		}
-#endif
 		goto exit;
 	}
 
@@ -2755,26 +2749,12 @@ int mmc_set_signal_voltage(struct mmc_host *host, int signal_voltage, u32 ocr)
 		err = -EAGAIN;
 
 power_cycle:
-#ifdef CONFIG_HUAWEI_KERNEL
-	if (err) {
-		pr_info("%s: Signal voltage switch failed, "
-			"power cycling card\n", mmc_hostname(host));
-		mmc_power_cycle(host, ocr);
-	}
-	else
-	{
-		if(host && (!strcmp(mmc_hostname(host),"mmc1")))
-			pr_info("%s: host and card voltage have changed into 1.8v success!\n", mmc_hostname(host));
-	}
-
-#else
 	if (err) {
 
 		pr_debug("%s: Signal voltage switch failed, "
 			"power cycling card\n", mmc_hostname(host));
 		mmc_power_cycle(host, ocr);
 	}
-#endif
 
 exit:
 	mmc_host_clk_release(host);
@@ -3961,12 +3941,6 @@ void mmc_rescan(struct work_struct *work)
 	struct mmc_host *host =
 		container_of(work, struct mmc_host, detect.work);
 
-#ifdef CONFIG_HUAWEI_KERNEL
-	if (!strcmp(mmc_hostname(host), "mmc1"))
-	{
-		pr_info("%s:mmc_rescan++\n",mmc_hostname(host));
-	}
-#endif
 	if (host->trigger_card_event && host->ops->card_event) {
 		host->ops->card_event(host);
 		host->trigger_card_event = false;
@@ -3975,13 +3949,6 @@ void mmc_rescan(struct work_struct *work)
 	spin_lock_irqsave(&host->lock, flags);
 	if (host->rescan_disable) {
 		spin_unlock_irqrestore(&host->lock, flags);
-#ifdef CONFIG_HUAWEI_KERNEL
-		if (!strcmp(mmc_hostname(host), "mmc1"))
-		{
-			pr_info("%s:%s:rescan_disable is true,so exit\n",mmc_hostname(host),__func__);
-			pr_info("%s:mmc_rescan--\n",mmc_hostname(host));
-		}
-#endif
 		return;
 	}
 	spin_unlock_irqrestore(&host->lock, flags);
@@ -3994,14 +3961,9 @@ void mmc_rescan(struct work_struct *work)
 #ifdef CONFIG_HUAWEI_KERNEL
 	if((!(host->caps & MMC_CAP_NONREMOVABLE)) && !(host->change_slot)&& !(host->sd_present))
 	{
-		pr_err("%s %d host->sd_init_retry_cnt = %d  host->change_slot =%d  host->sd_present = %d and return \n",
-			__func__,__LINE__, host->sd_init_retry_cnt, host->change_slot, host->sd_present);
-		pr_err("%s:mmc_rescan--\n",mmc_hostname(host));
 		return ;
 	}
 	if((!(host->caps & MMC_CAP_NONREMOVABLE)) && (host->sd_acmd41_timeout_cnt >= MAX_ACMD41_RETRY_TIMES)) {
-		pr_err("%s, this card stuck in acmd41 too many times, skip rescan for this card.", mmc_hostname(host));
-		pr_info("%s:mmc_rescan--\n",mmc_hostname(host));
 		return;
 	}
 #endif
@@ -4040,21 +4002,10 @@ void mmc_rescan(struct work_struct *work)
 
 	if (!(host->caps & MMC_CAP_NONREMOVABLE) && host->ops->get_cd &&
 			host->ops->get_cd(host) == 0) {
-#ifdef CONFIG_HUAWEI_KERNEL
-		if (!strcmp(mmc_hostname(host), "mmc1"))
-		{
-			pr_info("%s:%s:host->ops->get_cd(host) == 0, maybe the sdcard is not present, so exit\n",mmc_hostname(host),__func__);
-		}
-#endif
 		mmc_claim_host(host);
 		mmc_power_off(host);
 		mmc_release_host(host);
 		goto out;
-#ifdef CONFIG_HUAWEI_KERNEL
-	} else{
-		if (!strcmp(mmc_hostname(host), "mmc1"))
-			printk("%s:%d sdcard is present, prepare to init sdcard  \n",__func__, __LINE__);
-#endif
 	}
 
 	mmc_claim_host(host);
@@ -4064,12 +4015,6 @@ void mmc_rescan(struct work_struct *work)
  out:
 	if (host->caps & MMC_CAP_NEEDS_POLL)
 		mmc_schedule_delayed_work(&host->detect, HZ);
-#ifdef CONFIG_HUAWEI_KERNEL
-	if (!strcmp(mmc_hostname(host), "mmc1"))
-	{
-		pr_info("%s:mmc_rescan--\n",mmc_hostname(host));
-	}
-#endif
 }
 
 void mmc_start_host(struct mmc_host *host)

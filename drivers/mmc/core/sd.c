@@ -511,20 +511,8 @@ static void sd_update_bus_speed_mode(struct mmc_card *card)
 	 */
 	if (!mmc_host_uhs(card->host)) {
 		card->sd_bus_speed = 0;
-#ifdef CONFIG_HUAWEI_KERNEL
-		pr_err("%s: host do not support uhs-1.\n", mmc_hostname(card->host));
-#endif
 		return;
 	}
-#ifdef CONFIG_HUAWEI_KERNEL
-	pr_err("%s: host support %s %s %s %s %s\n",
-		mmc_hostname(card->host),
-		(card->host->caps & MMC_CAP_UHS_SDR12 ? "SDR12":""),
-		(card->host->caps & MMC_CAP_UHS_SDR25 ? "SDR25":""),
-		(card->host->caps & MMC_CAP_UHS_SDR50 ? "SDR50":""),
-		(card->host->caps & MMC_CAP_UHS_DDR50 ? "DDR50":""),
-		(card->host->caps & MMC_CAP_UHS_SDR104 ? "SDR104":""));
-#endif
 
 	if ((card->host->caps & MMC_CAP_UHS_SDR104) &&
 	    (card->sw_caps.sd3_bus_mode & SD_MODE_UHS_SDR104) &&
@@ -893,17 +881,8 @@ try_again:
 	 * block-addressed SDHC cards.
 	 */
 	err = mmc_send_if_cond(host, ocr);
-#ifdef CONFIG_HUAWEI_KERNEL
-	if (!err)
-	{
-		ocr |= SD_OCR_CCS;
-		pr_err("%s: sd card support SDHC or later \n", mmc_hostname(host));
-	}
-#else
 	if (!err)
 		ocr |= SD_OCR_CCS;
-#endif
-
 
 	/*
 	 * If the host supports one of UHS-I modes, request the card
@@ -951,9 +930,6 @@ try_again:
 	 */
 	if (!mmc_host_is_spi(host) && rocr &&
 	   ((*rocr & 0x41000000) == 0x41000000)) {
-#ifdef CONFIG_HUAWEI_KERNEL
-		pr_err("%s: sd card support uhs-1, and accept 1.8V switching request.\n", mmc_hostname(host));
-#endif
 		err = mmc_set_signal_voltage(host, MMC_SIGNAL_VOLTAGE_180,
 					pocr);
 		if (err == -EAGAIN) {
@@ -1009,16 +985,8 @@ int mmc_sd_setup_card(struct mmc_host *host, struct mmc_card *card,
 		 * Fetch SCR from card.
 		 */
 		err = mmc_app_send_scr(card, card->raw_scr);
-#ifdef CONFIG_HUAWEI_KERNEL
-		if (err)
-		{
-			pr_err("%s: send acmd51 to get scr fail when init sd first time, err=%d, please check data0!!!!\n", mmc_hostname(host), err);
-			return err;
-		}
-#else
 		if (err)
 			return err;
-#endif
 
 		err = mmc_decode_scr(card);
 		if (err)
@@ -1028,16 +996,8 @@ int mmc_sd_setup_card(struct mmc_host *host, struct mmc_card *card,
 		 * Fetch and process SD Status register.
 		 */
 		err = mmc_read_ssr(card);
-#ifdef CONFIG_HUAWEI_KERNEL
-		if (err)
-		{
-			pr_err("%s: send cmd13 to get ssr fail when init sd first time, err=%d.\n", mmc_hostname(host), err);
-			return err;
-		}
-#else
 		if (err)
 			return err;
-#endif
 
 		/* Erase init depends on CSD and SSR */
 		mmc_init_erase(card);
@@ -1065,16 +1025,8 @@ int mmc_sd_setup_card(struct mmc_host *host, struct mmc_card *card,
 		err = mmc_read_switch(card);
 #endif
 
-#ifdef CONFIG_HUAWEI_KERNEL
-		if (err)
-		{
-			pr_err("%s: send cmd6 fail when init sd first time, err=%d.\n", mmc_hostname(host), err);
-			return err;
-		}
-#else
 		if (err)
 			return err;
-#endif
 	}
 
 	/*
@@ -1152,16 +1104,8 @@ static int mmc_sd_init_card(struct mmc_host *host, u32 ocr,
 	WARN_ON(!host->claimed);
 
 	err = mmc_sd_get_cid(host, ocr, cid, &rocr);
-#ifdef CONFIG_HUAWEI_KERNEL
 	if (host && err)
-	{
-		pr_err("%s: send cmd2 to get cid fail, err=%d\n", mmc_hostname(host), err);
 		return err;
-	}
-#else
-	if (err)
-		return err;
-#endif
 
 	if (oldcard) {
 #ifdef CONFIG_HUAWEI_KERNEL
@@ -1206,10 +1150,6 @@ static int mmc_sd_init_card(struct mmc_host *host, u32 ocr,
 		err = mmc_send_relative_addr(host, &card->rca);
 		if (err)
 		{
-#ifdef CONFIG_HUAWEI_KERNEL
-			if(host)
-				pr_err("%s: send cmd3 to get RCA fail, err=%d\n", mmc_hostname(host), err);
-#endif
 			goto free_card;
 		}
 		host->card = card;
@@ -1254,10 +1194,6 @@ static int mmc_sd_init_card(struct mmc_host *host, u32 ocr,
 		err = mmc_select_card(card);
 		if (err)
 		{
-#ifdef CONFIG_HUAWEI_KERNEL
-			if(host)
-				pr_err("%s: send cmd7 to select sd fail, err=%d\n", mmc_hostname(host), err);
-#endif
 			goto free_card;
 		}
 	}
@@ -1281,10 +1217,6 @@ static int mmc_sd_init_card(struct mmc_host *host, u32 ocr,
 	err = mmc_sd_setup_card(host, card, oldcard != NULL);
 	if (err)
 	{
-#ifdef CONFIG_HUAWEI_KERNEL
-		if(host)
-			pr_err("%s: mmc_sd_setup_card fail.\n", mmc_hostname(host));
-#endif
 		goto free_card;
 	}
 
@@ -1293,10 +1225,6 @@ static int mmc_sd_init_card(struct mmc_host *host, u32 ocr,
 		err = mmc_sd_init_uhs_card(card);
 		if (err)
 		{
-#ifdef CONFIG_HUAWEI_KERNEL
-			if(host)
-				pr_err("%s: send cmd6 to uhs-1 sd fail, err=%d\n", mmc_hostname(host), err);
-#endif
 			goto free_card;
 		}
 	} else {
@@ -1308,10 +1236,6 @@ static int mmc_sd_init_card(struct mmc_host *host, u32 ocr,
 			mmc_set_timing(card->host, MMC_TIMING_SD_HS);
 		else if (err)
 		{
-#ifdef CONFIG_HUAWEI_KERNEL
-			if(host)
-				pr_err("%s: send cmd6 into high-speed mode fail(not uhs-1), err=%d\n", mmc_hostname(host), err);
-#endif
 			goto free_card;
 		}
 
@@ -1328,10 +1252,6 @@ static int mmc_sd_init_card(struct mmc_host *host, u32 ocr,
 			err = mmc_app_set_bus_width(card, MMC_BUS_WIDTH_4);
 			if (err)
 			{
-#ifdef CONFIG_HUAWEI_KERNEL
-				if(host)
-					pr_err("%s: send acmd6 into 4bit mode fail(not uhs-1), err=%d\n", mmc_hostname(host), err);
-#endif
 				goto free_card;
 			}
 
