@@ -42,6 +42,11 @@
 #include <linux/notifier.h>
 #include <linux/cpuset.h>
 
+#include <linux/cpu_input_boost.h>
+#include <linux/devfreq_boost.h>
+
+#define BOOST_DURATION_MS (250)
+
 #define CREATE_TRACE_POINTS
 #include "trace/lowmemorykiller.h"
 
@@ -272,6 +277,8 @@ static unsigned long lowmem_scan(struct shrinker *s, struct shrink_control *sc)
 		}
 
 		lowmem_deathpending_timeout = jiffies + HZ;
+        cpu_input_boost_kick_max(BOOST_DURATION_MS);
+        devfreq_boost_kick_max(DEVFREQ_MSM_CPUBW, BOOST_DURATION_MS);
 		set_tsk_thread_flag(selected, TIF_MEMDIE);
 		send_sig(SIGKILL, selected, 0);
 		rem += selected_tasksize;
