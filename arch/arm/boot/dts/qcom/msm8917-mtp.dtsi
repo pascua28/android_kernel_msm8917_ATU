@@ -107,9 +107,7 @@
 };
 
 &blsp1_uart2 {
-	status = "ok";
-	pinctrl-names = "default";
-	pinctrl-0 = <&uart_console_active>;
+	status = "disabled";
 };
 
 #include "msm8937-mdss-panels.dtsi"
