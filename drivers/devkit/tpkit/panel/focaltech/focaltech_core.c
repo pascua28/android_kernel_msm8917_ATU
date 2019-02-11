@@ -14,6 +14,11 @@
 #include <dsm/dsm_pub.h>
 #endif
 
+#include <linux/cpu_input_boost.h>
+#include <linux/devfreq_boost.h>
+
+#define BOOST_DURATION_MS (25)
+
 /*Gesture register(0xd0) value*/
 #define DOUBLE_CLICK_WAKEUP  		(0x24)
 #define SPECIFIC_LETTER_W  			(0x31)
@@ -1105,6 +1110,9 @@ static int focal_easy_wakeup_gesture_report_coordinate(unsigned int
 
 void dt2w_fn(void)
 {
+	cpu_input_boost_kick_max(BOOST_DURATION_MS);
+	devfreq_boost_kick_max(DEVFREQ_MSM_CPUBW, BOOST_DURATION_MS);
+
 	input_report_key(g_focal_dev_data->ts_platform_data->input_dev, KEY_POWER, 1);
 	input_sync(g_focal_dev_data->ts_platform_data->input_dev);
 	input_report_key(g_focal_dev_data->ts_platform_data->input_dev, KEY_POWER, 0);
