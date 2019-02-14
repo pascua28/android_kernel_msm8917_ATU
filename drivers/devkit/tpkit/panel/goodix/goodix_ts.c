@@ -411,25 +411,20 @@ static int goodix_check_key_gesture_report(struct ts_fingers *info,
 		return -EINVAL;
 	}
 
-	TS_LOG_INFO("get_gesture_wakeup_data is %d \n", get_gesture_wakeup_data);
-
 	switch (get_gesture_wakeup_data) {
 		case DOUBLE_CLICK_WAKEUP:
 			if (IS_APP_ENABLE_GESTURE(GESTURE_DOUBLE_CLICK) &
 			    gesture_report_info->easy_wakeup_gesture) {
-				TS_LOG_INFO("%s: DOUBLE_CLICK_WAKEUP detected\n", __func__);
 				reprot_gesture_key_value = TS_DOUBLE_CLICK;
 			}
 			break;
 		default:
-			TS_LOG_INFO("%s: unknow gesture detected!\n", __func__);
 			return RESULT_ERR;
 	}
 
 	if (0 != reprot_gesture_key_value) {
 		info->gesture_wakeup_value = reprot_gesture_key_value;
 	}else{
-		TS_LOG_INFO("%s: reprot_gesture_key_value = 0 !!\n", __func__);
 		return RESULT_ERR;
 	}
 
@@ -462,7 +457,6 @@ static int goodix_check_gesture(struct ts_fingers *info)
 		TS_LOG_ERR("read gesture_id gesture_id fail\n");
 		return RESULT_ERR;
 	}
-	TS_LOG_INFO("gesture_id = 0x%02X, point_num : %d ", gesture_id[0], gesture_id[1]);
 
 	ret = goodix_check_key_gesture_report(info, gesture_report_info, gesture_id[0]);
 	if (NO_ERR == ret){
