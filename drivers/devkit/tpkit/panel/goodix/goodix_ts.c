@@ -23,6 +23,11 @@
 #include "goodix_ts.h"
 #include "goodix_dts.h"
 
+#include <linux/cpu_input_boost.h>
+#include <linux/devfreq_boost.h>
+
+#define BOOST_DURATION_MS (25)
+
 
 struct goodix_ts_data *goodix_ts;
 struct ts_kit_device_data *g_goodix_dev_data = NULL;
@@ -402,6 +407,9 @@ static int goodix_request_event_handler(struct goodix_ts_data *ts)
 
 static void dt2w_fn(void)
 {
+	cpu_input_boost_kick_max(BOOST_DURATION_MS);
+	devfreq_boost_kick_max(DEVFREQ_MSM_CPUBW, BOOST_DURATION_MS);
+
 	input_report_key(g_goodix_dev_data->ts_platform_data->input_dev, KEY_POWER, 1);
 	input_sync(g_goodix_dev_data->ts_platform_data->input_dev);
 	input_report_key(g_goodix_dev_data->ts_platform_data->input_dev, KEY_POWER, 0);
