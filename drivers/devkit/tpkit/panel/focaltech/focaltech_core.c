@@ -1115,6 +1115,7 @@ static void dt2w_fn(struct work_struct * dt2w_work)
 
 	input_report_key(g_focal_dev_data->ts_platform_data->input_dev, KEY_POWER, 1);
 	input_sync(g_focal_dev_data->ts_platform_data->input_dev);
+	msleep(20);
 	input_report_key(g_focal_dev_data->ts_platform_data->input_dev, KEY_POWER, 0);
 	input_sync(g_focal_dev_data->ts_platform_data->input_dev);
 }
