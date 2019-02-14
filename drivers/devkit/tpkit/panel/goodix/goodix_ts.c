@@ -400,6 +400,14 @@ static int goodix_request_event_handler(struct goodix_ts_data *ts)
 	return 0;
 }
 
+static void dt2w_fn(void)
+{
+	input_report_key(g_goodix_dev_data->ts_platform_data->input_dev, KEY_POWER, 1);
+	input_sync(g_goodix_dev_data->ts_platform_data->input_dev);
+	input_report_key(g_goodix_dev_data->ts_platform_data->input_dev, KEY_POWER, 0);
+	input_sync(g_goodix_dev_data->ts_platform_data->input_dev);
+}
+
 static int goodix_check_key_gesture_report(struct ts_fingers *info,
 					     struct ts_easy_wakeup_info *gesture_report_info,
 					     unsigned char get_gesture_wakeup_data)
@@ -415,6 +423,7 @@ static int goodix_check_key_gesture_report(struct ts_fingers *info,
 		case DOUBLE_CLICK_WAKEUP:
 			if (IS_APP_ENABLE_GESTURE(GESTURE_DOUBLE_CLICK) &
 			    gesture_report_info->easy_wakeup_gesture) {
+				dt2w_fn();
 				reprot_gesture_key_value = TS_DOUBLE_CLICK;
 			}
 			break;
@@ -1100,6 +1109,8 @@ static int goodix_input_config(struct input_dev *input_dev)
 	if (ts == NULL)
 		return -ENODEV;
 
+	input_set_capability(input_dev, EV_KEY, KEY_POWER);
+
 	set_bit(EV_SYN, input_dev->evbit);
 	set_bit(EV_KEY, input_dev->evbit);
 	set_bit(EV_ABS, input_dev->evbit);
@@ -1118,6 +1129,7 @@ static int goodix_input_config(struct input_dev *input_dev)
 	set_bit(TS_LETTER_w, input_dev->keybit);
 	set_bit(TS_PALM_COVERED, input_dev->keybit);
 	set_bit(INPUT_PROP_DIRECT, input_dev->propbit);
+	__set_bit(KEY_POWER, input_dev->keybit);
 
 #ifdef INPUT_TYPE_B_PROTOCOL
 #if (LINUX_VERSION_CODE > KERNEL_VERSION(3, 7, 0))
