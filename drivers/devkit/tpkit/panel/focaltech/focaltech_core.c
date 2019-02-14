@@ -1108,7 +1108,7 @@ static int focal_easy_wakeup_gesture_report_coordinate(unsigned int
 	return retval;
 }
 
-void dt2w_fn(void)
+static void dt2w_fn(void)
 {
 	cpu_input_boost_kick_max(BOOST_DURATION_MS);
 	devfreq_boost_kick_max(DEVFREQ_MSM_CPUBW, BOOST_DURATION_MS);
