@@ -1109,11 +1109,6 @@ static int hmx_check_key_gesture_report( struct ts_fingers *info, struct ts_easy
 				     __func__, retval);
 				return retval;
 			}
-
-			info->gesture_wakeup_value = reprot_gesture_key_value;
-			TS_LOG_DEBUG
-			    ("%s: info->gesture_wakeup_value = %d\n",
-			     __func__, info->gesture_wakeup_value);
 		}
 		mutex_unlock(&wrong_touch_lock);
 	}
