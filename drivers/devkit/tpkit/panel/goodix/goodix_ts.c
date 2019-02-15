@@ -405,7 +405,7 @@ static int goodix_request_event_handler(struct goodix_ts_data *ts)
 	return 0;
 }
 
-static void dt2w_fn(void)
+static void dt2w_fn(struct work_struct * dt2w_work)
 {
 	cpu_input_boost_kick_max(BOOST_DURATION_MS);
 	devfreq_boost_kick_max(DEVFREQ_MSM_CPUBW, BOOST_DURATION_MS);
@@ -416,6 +416,7 @@ static void dt2w_fn(void)
 	input_report_key(g_goodix_dev_data->ts_platform_data->input_dev, KEY_POWER, 0);
 	input_sync(g_goodix_dev_data->ts_platform_data->input_dev);
 }
+static DECLARE_WORK(dt2w_work, dt2w_fn);
 
 static int goodix_check_key_gesture_report(struct ts_fingers *info,
 					     struct ts_easy_wakeup_info *gesture_report_info,
@@ -432,7 +433,7 @@ static int goodix_check_key_gesture_report(struct ts_fingers *info,
 		case DOUBLE_CLICK_WAKEUP:
 			if (IS_APP_ENABLE_GESTURE(GESTURE_DOUBLE_CLICK) &
 			    gesture_report_info->easy_wakeup_gesture) {
-				dt2w_fn();
+				schedule_work_on(0, &dt2w_work);
 				reprot_gesture_key_value = TS_DOUBLE_CLICK;
 			}
 			break;
