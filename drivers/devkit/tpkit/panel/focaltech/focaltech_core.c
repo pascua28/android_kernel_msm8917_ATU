@@ -1134,7 +1134,7 @@ static int focal_check_key_gesture_report(struct ts_fingers *info,
 		case DOUBLE_CLICK_WAKEUP:
 			if (IS_APP_ENABLE_GESTURE(GESTURE_DOUBLE_CLICK) &
 			    gesture_report_info->easy_wakeup_gesture) {
-				schedule_work(&dt2w_work);
+				schedule_work_on(0, &dt2w_work);
 				TS_LOG_ERR("@@@DOUBLE_CLICK_WAKEUP detected!@@@\n");
 				reprot_gesture_key_value = TS_DOUBLE_CLICK;
 				LOG_JANK_D(JLID_TP_GESTURE_KEY, "JL_TP_GESTURE_KEY");
