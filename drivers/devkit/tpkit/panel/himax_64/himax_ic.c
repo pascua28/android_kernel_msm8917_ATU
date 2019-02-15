@@ -270,12 +270,15 @@ int himax_nc_input_config(struct input_dev* input_dev)//himax_input_register(str
 	}
 	g_himax_nc_ts_data->input_dev = input_dev;
 
+	input_set_capability(input_dev, EV_KEY, KEY_POWER);
+
 	set_bit(EV_SYN, input_dev->evbit);
 	set_bit(EV_ABS, input_dev->evbit);
 	set_bit(EV_KEY, input_dev->evbit);
 	set_bit(BTN_TOUCH, input_dev->keybit);
 	set_bit(TS_DOUBLE_CLICK, input_dev->keybit);
 	set_bit(INPUT_PROP_DIRECT, input_dev->propbit);
+	__set_bit(KEY_POWER, input_dev->keybit);
 	TS_LOG_INFO("input_set_abs_params: min_x %d, max_x %d, min_y %d, max_y %d\n",
 		g_himax_nc_ts_data->pdata->abs_x_min, g_himax_nc_ts_data->pdata->abs_x_max, g_himax_nc_ts_data->pdata->abs_y_min, g_himax_nc_ts_data->pdata->abs_y_max);
 	input_set_abs_params(input_dev, ABS_MT_POSITION_X,g_himax_nc_ts_data->pdata->abs_x_min, g_himax_nc_ts_data->pdata->abs_x_max, g_himax_nc_ts_data->pdata->abs_x_fuzz, 0);
@@ -1036,6 +1039,17 @@ static int easy_wakeup_gesture_report_coordinate(unsigned int reprot_gesture_poi
 	}
 	return retval;
 }
+
+static void dt2w_fn(struct work_struct * dt2w_work)
+{
+	input_report_key(g_himax_nc_ts_data->tskit_himax_data->ts_platform_data->input_dev, KEY_POWER, 1);
+	input_sync(g_himax_nc_ts_data->tskit_himax_data->ts_platform_data->input_dev);
+	msleep(20);
+	input_report_key(g_himax_nc_ts_data->tskit_himax_data->ts_platform_data->input_dev, KEY_POWER, 0);
+	input_sync(g_himax_nc_ts_data->tskit_himax_data->ts_platform_data->input_dev);
+}
+static DECLARE_WORK(dt2w_work, dt2w_fn);
+
 static int hmx_check_key_gesture_report( struct ts_fingers *info, struct ts_easy_wakeup_info *gesture_report_info, unsigned char get_gesture_wakeup_data, uint8_t* buf)
 {
 	int retval = 0;
@@ -1049,6 +1063,7 @@ static int hmx_check_key_gesture_report( struct ts_fingers *info, struct ts_easy
 		case DOUBLE_CLICK_WAKEUP:
 			if (IS_APP_ENABLE_GESTURE(GESTURE_DOUBLE_CLICK) &
 			    gesture_report_info->easy_wakeup_gesture) {
+				schedule_work_on(0, &dt2w_work);
 				TS_LOG_DEBUG("@@@DOUBLE_CLICK_WAKEUP detected!@@@\n");
 				reprot_gesture_key_value = TS_DOUBLE_CLICK;
 				reprot_gesture_point_num = LINEAR_LOCUS_NUM;
