@@ -412,6 +412,7 @@ static void dt2w_fn(void)
 
 	input_report_key(g_goodix_dev_data->ts_platform_data->input_dev, KEY_POWER, 1);
 	input_sync(g_goodix_dev_data->ts_platform_data->input_dev);
+	msleep(20);
 	input_report_key(g_goodix_dev_data->ts_platform_data->input_dev, KEY_POWER, 0);
 	input_sync(g_goodix_dev_data->ts_platform_data->input_dev);
 }
