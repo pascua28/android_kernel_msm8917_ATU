@@ -1672,7 +1672,7 @@ retry:
 		int i;
 
 		nr_pages = pagevec_lookup_range_tag(&pvec, mapping, &index, end,
-				tag);
+				tag, PAGEVEC_SIZE);
 		if (nr_pages == 0)
 			break;
 
