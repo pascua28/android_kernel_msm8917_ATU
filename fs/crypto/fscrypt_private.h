@@ -13,7 +13,6 @@
 
 #include <linux/fscrypt_supp.h>
 #include <crypto/hash.h>
-#include <crypto/aead.h>
 
 /* Encryption parameters */
 #define FS_IV_SIZE			16
@@ -25,23 +24,18 @@
 #define FS_AES_256_CTS_KEY_SIZE		32
 #define FS_AES_256_XTS_KEY_SIZE		64
 
-#define FS_KEY_DERIVATION_NONCE_SIZE           64
-#define FS_KEY_DERIVATION_IV_SIZE              16
-#define FS_KEY_DERIVATION_TAG_SIZE             16
-#define FS_KEY_DERIVATION_CIPHER_SIZE          (64 + 16) /* nonce + tag */
-#define FS_ENCRYPTION_CONTEXT_FORMAT_V2                2
+#define FS_KEY_DERIVATION_NONCE_SIZE		16
 
 /**
  * Encryption context for inode
  *
  * Protector format:
- *  1 byte: Protector format (2 = this version)
+ *  1 byte: Protector format (1 = this version)
  *  1 byte: File contents encryption mode
  *  1 byte: File names encryption mode
  *  1 byte: Flags
  *  8 bytes: Master Key descriptor
- *  80 bytes: Encryption Key derivation nonce (encrypted)
- *  12 bytes: IV
+ *  16 bytes: Encryption Key derivation nonce
  */
 struct fscrypt_context {
 	u8 format;
@@ -49,9 +43,10 @@ struct fscrypt_context {
 	u8 filenames_encryption_mode;
 	u8 flags;
 	u8 master_key_descriptor[FS_KEY_DESCRIPTOR_SIZE];
-	u8 nonce[FS_KEY_DERIVATION_CIPHER_SIZE];
-	u8 iv[FS_KEY_DERIVATION_IV_SIZE];
+	u8 nonce[FS_KEY_DERIVATION_NONCE_SIZE];
 } __packed;
+
+#define FS_ENCRYPTION_CONTEXT_FORMAT_V1		1
 
 /*
  * A pointer to this structure is stored in the file system's in-core
@@ -61,8 +56,7 @@ struct fscrypt_info {
 	u8 ci_data_mode;
 	u8 ci_filename_mode;
 	u8 ci_flags;
-	struct crypto_skcipher *ci_ctfm;
-	struct crypto_aead *ci_gtfm;
+	struct crypto_ablkcipher *ci_ctfm;
 	struct crypto_cipher *ci_essiv_tfm;
 	u8 ci_master_key[FS_KEY_DESCRIPTOR_SIZE];
 };
@@ -123,10 +117,6 @@ extern struct page *fscrypt_alloc_bounce_page(struct fscrypt_ctx *ctx,
 					      gfp_t gfp_flags);
 
 /* keyinfo.c */
-extern int fscrypt_set_gcm_key(struct crypto_aead *, u8 *);
-extern int fscrypt_derive_gcm_key(struct crypto_aead *,
-				u8 *, u8 *, u8 *, int);
-extern struct key *fscrypt_request_key(u8 *, u8 *, int);
 extern void __exit fscrypt_essiv_cleanup(void);
 
 #endif /* _FSCRYPT_PRIVATE_H */
