@@ -51,22 +51,6 @@ module_param_named(debug_mask, binder_alloc_debug_mask,
 			pr_info(x); \
 	} while (0)
 
-static struct kmem_cache *binder_buffer_pool;
-
-int binder_buffer_pool_create(void)
-{
-	binder_buffer_pool = KMEM_CACHE(binder_buffer, SLAB_HWCACHE_ALIGN);
-	if (!binder_buffer_pool)
-		return -ENOMEM;
-
-	return 0;
-}
-
-void binder_buffer_pool_destroy(void)
-{
-	kmem_cache_destroy(binder_buffer_pool);
-}
-
 static size_t binder_alloc_buffer_size(struct binder_alloc *alloc,
 				       struct binder_buffer *buffer)
 {
