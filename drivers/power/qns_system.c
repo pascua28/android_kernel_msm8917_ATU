@@ -21,10 +21,6 @@
 #include <linux/slab.h>
 #include <linux/power_supply.h>
 #include <linux/alarmtimer.h>
-#include <linux/qpnp/qpnp-adc.h>
-#include <linux/batterydata-lib.h>
-#include <linux/of_batterydata.h>
-#include <linux/msm_bcl.h>
 
 static struct power_supply * battery_psy = NULL;
 
