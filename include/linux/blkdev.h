@@ -38,7 +38,7 @@ struct bsg_job;
 struct blkcg_gq;
 struct blk_flush_queue;
 
-#define BLKDEV_MIN_RQ	4
+#define BLKDEV_MIN_RQ	16
 #define BLKDEV_MAX_RQ	128	/* Default maximum */
 
 /*
