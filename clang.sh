@@ -15,7 +15,7 @@ make -j$(nproc --all) \
 ARCH=arm64 \
 CC=~/clang/bin/clang \
 CLANG_TRIPLE=aarch64-linux-gnu- \
-CROSS_COMPILE=~/linaro/bin/aarch64-linux-gnu- \
+CROSS_COMPILE=~/arm64/bin/aarch64-linux-gnu- \
 Image.gz-dtb
 DATE_END=$(date +"%s")
 DIFF=$(($DATE_END - $DATE_START))
